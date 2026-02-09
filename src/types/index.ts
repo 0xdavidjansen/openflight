@@ -13,6 +13,7 @@ export interface PersonalInfo {
   pkNumber?: string;
   documentDate?: string;
   sheetNumber?: string;
+  detectedHomebase?: 'MUC' | 'FRA' | 'Unknown'; // Auto-detected from flights
 }
 
 // Raw flight data from Flugstundenübersicht PDF
@@ -67,6 +68,7 @@ export interface Settings {
   countMedicalAsTrip: boolean; // ME days = round trip
   countGroundDutyAsTrip: boolean; // EM, RE, DP, DT, SI, TK, SB = round trip
   countForeignAsWorkDay: boolean; // FL days as work days
+  homebaseOverride?: 'MUC' | 'FRA' | null; // Manual override (null = auto-detect)
 }
 
 // Monthly calculation results

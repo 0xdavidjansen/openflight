@@ -22,6 +22,7 @@ import {
   calculateTaxDeduction,
   calculateDailyAllowances,
   getFahrzeitMinutes,
+  detectHomebase,
 } from '../utils/calculations';
 
 // Combined context that provides backward-compatible API
@@ -171,9 +172,32 @@ function AppContextInner({ children }: { children: React.ReactNode }) {
   const deferredReimbursementData = useDeferredValue(flightState.reimbursementData);
   const deferredAircraftType = useDeferredValue(flightState.personalInfo?.aircraftType);
 
+  // Detect homebase from flight patterns (fresh calculation, not deferred)
+  const detectedHomebaseValue = useMemo(
+    () => detectHomebase(deferredFlights),
+    [deferredFlights]
+  );
+
+  // Update personalInfo with detected homebase when it changes
+  React.useEffect(() => {
+    if (flightState.personalInfo && detectedHomebaseValue !== flightState.personalInfo.detectedHomebase) {
+      setPersonalInfo({
+        ...flightState.personalInfo,
+        detectedHomebase: detectedHomebaseValue,
+      });
+    }
+  }, [detectedHomebaseValue, flightState.personalInfo, setPersonalInfo]);
+
   const monthlyBreakdown = useMemo(
-    () => calculateMonthlyBreakdown(deferredFlights, deferredNonFlightDays, deferredSettings, deferredReimbursementData, deferredAircraftType),
-    [deferredFlights, deferredNonFlightDays, deferredSettings, deferredReimbursementData, deferredAircraftType]
+    () => calculateMonthlyBreakdown(
+      deferredFlights, 
+      deferredNonFlightDays, 
+      deferredSettings, 
+      deferredReimbursementData, 
+      deferredAircraftType,
+      detectedHomebaseValue  // Use fresh value instead of deferred
+    ),
+    [deferredFlights, deferredNonFlightDays, deferredSettings, deferredReimbursementData, deferredAircraftType, detectedHomebaseValue]
   );
 
   const taxCalculation = useMemo(
@@ -183,9 +207,10 @@ function AppContextInner({ children }: { children: React.ReactNode }) {
         deferredNonFlightDays,
         deferredSettings,
         deferredReimbursementData,
-        deferredAircraftType
+        deferredAircraftType,
+        detectedHomebaseValue  // Use fresh value instead of deferred
       ),
-    [deferredFlights, deferredNonFlightDays, deferredSettings, deferredReimbursementData, deferredAircraftType]
+    [deferredFlights, deferredNonFlightDays, deferredSettings, deferredReimbursementData, deferredAircraftType, detectedHomebaseValue]
   );
 
   // Calculate daily allowances for display in flight table

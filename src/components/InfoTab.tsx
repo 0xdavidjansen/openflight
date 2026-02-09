@@ -4,7 +4,12 @@ import { User, Calendar, Hash, Building, Plane } from 'lucide-react';
 
 export function InfoTab() {
   const { state } = useApp();
-  const { personalInfo, flights } = state;
+  const { personalInfo, flights, settings } = state;
+
+  // Calculate final homebase (override takes precedence over detected)
+  const finalHomebase = useMemo(() => {
+    return settings.homebaseOverride ?? personalInfo?.detectedHomebase ?? 'Unknown';
+  }, [settings.homebaseOverride, personalInfo?.detectedHomebase]);
 
   // Get year range - memoized
   const yearRange = useMemo(() => {
@@ -102,6 +107,20 @@ export function InfoTab() {
                     </div>
                   </div>
                 )}
+                <div className="flex items-center gap-3">
+                  <Plane className="w-4 h-4 text-slate-400" />
+                  <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Homebase
+                      {settings.homebaseOverride && (
+                        <span className="ml-1 text-amber-500">(manuell)</span>
+                      )}
+                    </p>
+                    <p className="font-medium text-slate-800 dark:text-white">
+                      {finalHomebase === 'Unknown' ? 'Unbekannt' : finalHomebase}
+                    </p>
+                  </div>
+                </div>
                 {personalInfo.costCenter && (
                   <div className="flex items-center gap-3">
                     <Building className="w-4 h-4 text-slate-400" />

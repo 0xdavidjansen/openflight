@@ -7,6 +7,7 @@ import {
   countTrips,
   detectTrips,
   detectHotelNights,
+  detectSameDayRoundTrips,
   calculateMealAllowances,
   calculateMonthlyBreakdown,
   calculateTaxDeduction,
@@ -196,14 +197,365 @@ describe('countTrips', () => {
     expect(result).toBe(4) // 2 ME days * 2 trips each (round trip)
   })
 
-  it('adds ground duty days as trips', () => {
+  it('adds ground duty days as trips (except RE)', () => {
     const nonFlightDays: NonFlightDay[] = [
       createNonFlightDay('2024-01-15', 'SB'),
-      createNonFlightDay('2024-01-16', 'RE'),
+      createNonFlightDay('2024-01-16', 'RE'), // RE is excluded
       createNonFlightDay('2024-01-17', 'SI'),
     ]
     const result = countTrips([], nonFlightDays, defaultSettings)
-    expect(result).toBe(6) // 3 ground duty days * 2 trips each (round trip)
+    expect(result).toBe(4) // 2 ground duty days (SB, SI) * 2 trips each = 4 (RE excluded)
+  })
+
+  it('counts same-day round trip as 2 trips when no A/E flag', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'),
+      createFlightWithRoute('2023-05-15', 'LH101', 'MUC', 'FRA'),
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'FRA')
+    expect(result).toBe(2) // Round trip = 2 trips
+  })
+
+  it('counts same-day round trip from MUC homebase', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'MUC', 'FRA'),
+      createFlightWithRoute('2023-05-15', 'LH101', 'FRA', 'MUC'),
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'MUC')
+    expect(result).toBe(2) // Round trip = 2 trips
+  })
+
+  it('does not double count same-day round trip if A/E flag already present', () => {
+    const flights: Flight[] = [
+      { ...createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'), dutyCode: 'A' },
+      createFlightWithRoute('2023-05-15', 'LH101', 'MUC', 'FRA'),
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'FRA')
+    expect(result).toBe(1) // Only count the A flag once, not the round trip
+  })
+
+  it('does not count same-day round trip if homebase is unknown', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'),
+      createFlightWithRoute('2023-05-15', 'LH101', 'MUC', 'FRA'),
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'Unknown')
+    expect(result).toBe(0) // No trips counted without homebase
+  })
+
+  it('does not count same-day round trip if homebase is not provided', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'),
+      createFlightWithRoute('2023-05-15', 'LH101', 'MUC', 'FRA'),
+    ]
+    const result = countTrips(flights, [], defaultSettings)
+    expect(result).toBe(0) // No trips counted without homebase parameter
+  })
+
+  it('counts single FRA→FRA flight as 2 trips', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH9141', 'FRA', 'FRA'),
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'FRA')
+    expect(result).toBe(2) // Round trip = 2 trips (outbound + return)
+  })
+
+  it('counts single MUC→MUC flight as 2 trips', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-29', 'LH9142', 'MUC', 'MUC'),
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'MUC')
+    expect(result).toBe(2) // Round trip = 2 trips (outbound + return)
+  })
+
+  it('does not double count FRA→FRA when A flag present', () => {
+    const flights: Flight[] = [
+      { ...createFlightWithRoute('2023-05-15', 'LH9141', 'FRA', 'FRA'), dutyCode: 'A' },
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'FRA')
+    expect(result).toBe(1) // Only count A flag, not the round trip
+  })
+
+  it('does not double count FRA→FRA when E flag present', () => {
+    const flights: Flight[] = [
+      { ...createFlightWithRoute('2023-05-15', 'LH9141', 'FRA', 'FRA'), dutyCode: 'E' },
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'FRA')
+    expect(result).toBe(1) // Only count E flag, not the round trip
+  })
+
+  it('counts multiple FRA→FRA flights on different days', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH9141', 'FRA', 'FRA'),
+      createFlightWithRoute('2023-05-29', 'LH9142', 'FRA', 'FRA'),
+      createFlightWithRoute('2023-05-30', 'LH9143', 'FRA', 'FRA'),
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'FRA')
+    expect(result).toBe(6) // 3 days * 2 trips each = 6 trips
+  })
+
+  it('does not count FRA→FRA when homebase is Unknown', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH9141', 'FRA', 'FRA'),
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'Unknown')
+    expect(result).toBe(0) // No trips counted when homebase is unknown
+  })
+
+  it('respects homebaseOverride in settings over detected homebase', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH9141', 'FRA', 'FRA'),
+    ]
+    const settingsWithOverride = {
+      ...defaultSettings,
+      homebaseOverride: 'MUC' as const,  // Override to MUC
+    }
+    // Should NOT count FRA→FRA because homebase is overridden to MUC (not FRA)
+    const result = countTrips(flights, [], settingsWithOverride, 'FRA')
+    expect(result).toBe(0)
+  })
+
+  it('uses detected homebase when homebaseOverride is null', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH9141', 'FRA', 'FRA'),
+    ]
+    const settingsNoOverride = {
+      ...defaultSettings,
+      homebaseOverride: null,  // No override (auto-detect)
+    }
+    // Should count FRA→FRA because detected homebase is FRA
+    const result = countTrips(flights, [], settingsNoOverride, 'FRA')
+    expect(result).toBe(2)
+  })
+
+  it('homebaseOverride takes precedence and enables counting', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH9141', 'MUC', 'MUC'),
+    ]
+    const settingsWithOverride = {
+      ...defaultSettings,
+      homebaseOverride: 'MUC' as const,
+    }
+    // Should count MUC→MUC when override is MUC, even if detected is FRA
+    const result = countTrips(flights, [], settingsWithOverride, 'FRA')
+    expect(result).toBe(2)
+  })
+
+  it('homebaseOverride undefined uses detected homebase', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH9141', 'FRA', 'FRA'),
+    ]
+    const settingsUndefinedOverride = {
+      ...defaultSettings,
+      homebaseOverride: undefined,  // Undefined means use detected
+    }
+    // Should count FRA→FRA because override is undefined, so use detected FRA
+    const result = countTrips(flights, [], settingsUndefinedOverride, 'FRA')
+    expect(result).toBe(2)
+  })
+
+  it('counts each A and E flag separately, not unique days', () => {
+    const flights: Flight[] = [
+      { ...createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'JFK'), dutyCode: 'A' },
+      { ...createFlightWithRoute('2023-05-15', 'LH101', 'JFK', 'FRA'), dutyCode: 'E' },
+      { ...createFlightWithRoute('2023-05-16', 'LH102', 'FRA', 'LHR'), dutyCode: 'A' },
+      { ...createFlightWithRoute('2023-05-16', 'LH103', 'LHR', 'FRA'), dutyCode: 'E' },
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'FRA')
+    // 2 A flags + 2 E flags = 4 trips (NOT 2 unique days!)
+    expect(result).toBe(4)
+  })
+
+  it('counts May 2023 scenario: 2A + 3E + 3 FRA→FRA = 11 trips', () => {
+    const flights: Flight[] = [
+      // 2 A flags
+      { ...createFlightWithRoute('2023-05-01', 'LH100', 'FRA', 'JFK'), dutyCode: 'A' },
+      { ...createFlightWithRoute('2023-05-05', 'LH102', 'FRA', 'LHR'), dutyCode: 'A' },
+      // 3 E flags
+      { ...createFlightWithRoute('2023-05-02', 'LH101', 'JFK', 'FRA'), dutyCode: 'E' },
+      { ...createFlightWithRoute('2023-05-06', 'LH103', 'LHR', 'FRA'), dutyCode: 'E' },
+      { ...createFlightWithRoute('2023-05-10', 'LH105', 'CDG', 'FRA'), dutyCode: 'E' },
+      // 3 FRA→FRA flights without A/E flags
+      createFlightWithRoute('2023-05-15', 'LH9141', 'FRA', 'FRA'),
+      createFlightWithRoute('2023-05-29', 'LH9142', 'FRA', 'FRA'),
+      createFlightWithRoute('2023-05-30', 'LH9143', 'FRA', 'FRA'),
+    ]
+    const result = countTrips(flights, [], defaultSettings, 'FRA')
+    // 2 A flags = 2 trips
+    // 3 E flags = 3 trips
+    // 3 FRA→FRA = 6 trips (3 × 2)
+    // Total = 2 + 3 + 6 = 11 trips
+    expect(result).toBe(11)
+  })
+
+  it('never counts RE (training/simulator) as trips even when ground duty is enabled', () => {
+    const nonFlightDays: NonFlightDay[] = [
+      createNonFlightDay('2023-05-15', 'RE'),  // Training/simulator
+    ]
+    const settingsWithGroundDuty = {
+      ...defaultSettings,
+      countGroundDutyAsTrip: true,  // Ground duty counting is enabled
+    }
+    const result = countTrips([], nonFlightDays, settingsWithGroundDuty, 'FRA')
+    // RE should never count, even when countGroundDutyAsTrip is true
+    expect(result).toBe(0)
+  })
+
+  it('counts other ground duty codes (not RE) when enabled', () => {
+    const nonFlightDays: NonFlightDay[] = [
+      createNonFlightDay('2023-05-15', 'EM'),  // Einsatz mit Übernachtung
+      createNonFlightDay('2023-05-16', 'SB'),  // Standby
+    ]
+    const settingsWithGroundDuty = {
+      ...defaultSettings,
+      countGroundDutyAsTrip: true,
+    }
+    const result = countTrips([], nonFlightDays, settingsWithGroundDuty, 'FRA')
+    // EM and SB should count as 2 trips each when enabled
+    expect(result).toBe(4) // 2 days × 2 trips = 4
+  })
+})
+
+describe('detectSameDayRoundTrips', () => {
+  it('detects FRA same-day round trip', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'),
+      createFlightWithRoute('2023-05-15', 'LH101', 'MUC', 'FRA'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'FRA', new Set())
+    expect(result.has('2023-05-15')).toBe(true)
+    expect(result.size).toBe(1)
+  })
+
+  it('detects MUC same-day round trip', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'MUC', 'FRA'),
+      createFlightWithRoute('2023-05-15', 'LH101', 'FRA', 'MUC'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'MUC', new Set())
+    expect(result.has('2023-05-15')).toBe(true)
+    expect(result.size).toBe(1)
+  })
+
+  it('detects round trip with multiple flights in between', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'),
+      createFlightWithRoute('2023-05-15', 'LH101', 'MUC', 'BER'),
+      createFlightWithRoute('2023-05-15', 'LH102', 'BER', 'FRA'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'FRA', new Set())
+    expect(result.has('2023-05-15')).toBe(true)
+  })
+
+  it('does not detect if only one flight', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'FRA', new Set())
+    expect(result.size).toBe(0)
+  })
+
+  it('does not detect if not returning to homebase', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'),
+      createFlightWithRoute('2023-05-15', 'LH101', 'MUC', 'BER'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'FRA', new Set())
+    expect(result.size).toBe(0)
+  })
+
+  it('does not detect if not departing from homebase', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'BER', 'MUC'),
+      createFlightWithRoute('2023-05-15', 'LH101', 'MUC', 'FRA'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'FRA', new Set())
+    expect(result.size).toBe(0)
+  })
+
+  it('returns empty set for unknown homebase', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'),
+      createFlightWithRoute('2023-05-15', 'LH101', 'MUC', 'FRA'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'Unknown', new Set())
+    expect(result.size).toBe(0)
+  })
+
+  it('detects multiple same-day round trips on different days', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'),
+      createFlightWithRoute('2023-05-15', 'LH101', 'MUC', 'FRA'),
+      createFlightWithRoute('2023-05-16', 'LH102', 'FRA', 'BER'),
+      createFlightWithRoute('2023-05-16', 'LH103', 'BER', 'FRA'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'FRA', new Set())
+    expect(result.has('2023-05-15')).toBe(true)
+    expect(result.has('2023-05-16')).toBe(true)
+    expect(result.size).toBe(2)
+  })
+
+  it('detects single flight from homebase to homebase (FRA→FRA)', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH9141', 'FRA', 'FRA'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'FRA', new Set())
+    expect(result.has('2023-05-15')).toBe(true)
+    expect(result.size).toBe(1)
+  })
+
+  it('detects single flight from homebase to homebase (MUC→MUC)', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-29', 'LH9142', 'MUC', 'MUC'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'MUC', new Set())
+    expect(result.has('2023-05-29')).toBe(true)
+    expect(result.size).toBe(1)
+  })
+
+  it('does not detect FRA→FRA when homebase is MUC', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH9141', 'FRA', 'FRA'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'MUC', new Set())
+    expect(result.size).toBe(0)
+  })
+
+  it('does not detect single flight not returning to homebase', () => {
+    const flights: Flight[] = [
+      createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'),
+    ]
+    const result = detectSameDayRoundTrips(flights, 'FRA', new Set())
+    expect(result.size).toBe(0)
+  })
+
+  it('excludes days with A/E flags from same-day round trip detection', () => {
+    const flights: Flight[] = [
+      { ...createFlightWithRoute('2023-05-15', 'LH100', 'FRA', 'MUC'), dutyCode: 'A' },
+      createFlightWithRoute('2023-05-15', 'LH101', 'MUC', 'FRA'),
+      createFlightWithRoute('2023-05-16', 'LH102', 'FRA', 'BER'),
+      createFlightWithRoute('2023-05-16', 'LH103', 'BER', 'FRA'),
+    ]
+    const daysWithAE = new Set(['2023-05-15'])  // 15.05 has A flag
+    const result = detectSameDayRoundTrips(flights, 'FRA', daysWithAE)
+    // 15.05 should be excluded because it has A flag
+    // 16.05 should be included
+    expect(result.has('2023-05-15')).toBe(false)
+    expect(result.has('2023-05-16')).toBe(true)
+    expect(result.size).toBe(1)
+  })
+
+  it('excludes 17.05 with A and E flags even though it forms FRA→FRA', () => {
+    const flights: Flight[] = [
+      { ...createFlightWithRoute('2023-05-17', 'LH9916', 'FRA', 'IGS'), dutyCode: 'A' },
+      createFlightWithRoute('2023-05-17', 'LH9601', 'IGS', 'IGS'),
+      { ...createFlightWithRoute('2023-05-17', 'LH9917', 'IGS', 'FRA'), dutyCode: 'E' },
+    ]
+    const daysWithAE = new Set(['2023-05-17'])  // 17.05 has A and E flags
+    const result = detectSameDayRoundTrips(flights, 'FRA', daysWithAE)
+    // Should NOT include 17.05 because it has A/E flags
+    expect(result.has('2023-05-17')).toBe(false)
+    expect(result.size).toBe(0)
   })
 })
 

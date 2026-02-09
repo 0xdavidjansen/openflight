@@ -29,6 +29,28 @@ import { getCountryFromAirport, getCountryName } from './airports';
 import { AIRPORT_TO_CITY_ALLOWANCE } from './allowancesData';
  
 /**
+ * Detect homebase (MUC or FRA) from flight patterns
+ * Counts departures and arrivals for both airports and returns the one with higher count
+ * Returns 'Unknown' if tie or neither airport is used
+ */
+export function detectHomebase(flights: Flight[]): 'MUC' | 'FRA' | 'Unknown' {
+  if (flights.length === 0) return 'Unknown';
+  
+  let mucCount = 0;
+  let fraCount = 0;
+  
+  flights.forEach(flight => {
+    if (flight.departure === 'MUC') mucCount++;
+    if (flight.arrival === 'MUC') mucCount++;
+    if (flight.departure === 'FRA') fraCount++;
+    if (flight.arrival === 'FRA') fraCount++;
+  });
+  
+  if (mucCount === fraCount) return 'Unknown';
+  return mucCount > fraCount ? 'MUC' : 'FRA';
+}
+
+/**
  * Parse time string "HH:MM" to decimal hours
  */
 export function parseTimeToHours(timeStr: string): number {
@@ -285,28 +307,109 @@ export function countWorkDays(
 }
 
 /**
+ * Detect same-day round trips from homebase
+ * Returns array of dates that have same-day round trips (excluding days with A/E flags)
+ */
+export function detectSameDayRoundTrips(
+  flights: Flight[],
+  homebase: 'MUC' | 'FRA' | 'Unknown',
+  daysWithAE: Set<string>
+): Set<string> {
+  const sameDayRoundTripDates = new Set<string>();
+  
+  if (homebase === 'Unknown') {
+    return sameDayRoundTripDates;
+  }
+  
+  // Group flights by date
+  const flightsByDate = new Map<string, Flight[]>();
+  
+  for (const flight of flights) {
+    const dateKey = flight.date.toISOString().split('T')[0];
+    if (!flightsByDate.has(dateKey)) {
+      flightsByDate.set(dateKey, []);
+    }
+    flightsByDate.get(dateKey)!.push(flight);
+  }
+  
+  // Check each day for same-day round trips
+  for (const [dateKey, dayFlights] of flightsByDate) {
+    // Skip days that have A/E flags (those are already counted as tours)
+    if (daysWithAE.has(dateKey)) {
+      continue;
+    }
+    // Handle single flight from homebase to homebase (e.g., FRA→FRA training flight)
+    if (dayFlights.length === 1) {
+      const flight = dayFlights[0];
+      if (flight.departure === homebase && flight.arrival === homebase) {
+        sameDayRoundTripDates.add(dateKey);
+      }
+      continue;
+    }
+    
+    // Handle multiple flights forming a round trip
+    // Sort by departure time
+    const sortedFlights = [...dayFlights].sort((a, b) => 
+      a.departureTime.localeCompare(b.departureTime)
+    );
+    
+    const firstFlight = sortedFlights[0];
+    const lastFlight = sortedFlights[sortedFlights.length - 1];
+    
+    // Check if round trip from homebase
+    if (firstFlight.departure === homebase &&
+        lastFlight.arrival === homebase) {
+      sameDayRoundTripDates.add(dateKey);
+    }
+  }
+  
+  return sameDayRoundTripDates;
+}
+
+/**
  * Count commute trips based on settings
  */
 export function countTrips(
   flights: Flight[],
   nonFlightDays: NonFlightDay[],
-  settings: Settings
+  settings: Settings,
+  detectedHomebase?: 'MUC' | 'FRA' | 'Unknown'
 ): number {
   let trips = 0;
   
-  // Count A flags (to work)
+  // Resolve effective homebase: manual override takes precedence over auto-detection
+  const effectiveHomebase = settings.homebaseOverride ?? detectedHomebase;
+  
+  // Create set of days that have A/E flags (for efficient lookup)
+  const daysWithAE = new Set<string>();
+  for (const flight of flights) {
+    if (flight.dutyCode === 'A' || flight.dutyCode === 'E') {
+      daysWithAE.add(flight.date.toISOString().split('T')[0]);
+    }
+  }
+  
+  // Detect same-day round trips from homebase (excluding days with A/E flags)
+  const sameDayRoundTripDates = effectiveHomebase 
+    ? detectSameDayRoundTrips(flights, effectiveHomebase, daysWithAE)
+    : new Set<string>();
+  
+  // Count A and E flags as trips
   if (settings.countOnlyAFlag) {
+    // Count only A flags (outbound trips to work)
     trips += flights.filter((f) => f.dutyCode === 'A').length;
   } else {
-    // Count unique days with A or E flags
-    const daysWithAE = new Set<string>();
-    for (const flight of flights) {
-      if (flight.dutyCode === 'A' || flight.dutyCode === 'E') {
-        daysWithAE.add(flight.date.toISOString().split('T')[0]);
-      }
-    }
-    trips += daysWithAE.size;
+    // Count EACH A and E flag as a separate trip
+    // A flag = 1 trip (outbound to work)
+    // E flag = 1 trip (return from work)
+    // Round trip (A + E on same day) = 2 trips
+    const aFlags = flights.filter((f) => f.dutyCode === 'A').length;
+    const eFlags = flights.filter((f) => f.dutyCode === 'E').length;
+    trips += aFlags + eFlags;
   }
+  
+  // Add same-day round trips (days with A/E flags are already filtered out)
+  // Each same-day round trip = 2 trips (outbound + return)
+  trips += sameDayRoundTripDates.size * 2;
   
   // ME days = round trip (to and from)
   if (settings.countMedicalAsTrip) {
@@ -314,10 +417,11 @@ export function countTrips(
     trips += meDays.length * 2; // Each ME day = 2 trips (there and back)
   }
   
-  // Ground duty days = round trip
+  // Ground duty days = round trip (EXCEPT RE - training/simulator never counts)
   if (settings.countGroundDutyAsTrip) {
     const groundDays = nonFlightDays.filter((d) =>
-      GROUND_DUTY_CODES.includes(d.type as typeof GROUND_DUTY_CODES[number])
+      GROUND_DUTY_CODES.includes(d.type as typeof GROUND_DUTY_CODES[number]) &&
+      d.type !== 'RE'  // RE (training/simulator) never counts as trips
     );
     trips += groundDays.length * 2; // Each ground duty day = 2 trips (there and back)
   }
@@ -1251,7 +1355,8 @@ export function calculateMonthlyBreakdown(
   nonFlightDays: NonFlightDay[],
   settings: Settings,
   reimbursementData: ReimbursementData[] = [],
-  aircraftType?: string
+  aircraftType?: string,
+  detectedHomebase?: 'MUC' | 'FRA' | 'Unknown'
 ): MonthlyBreakdown[] {
   // Merge continuation flights with their parent flights from previous month
   const mergedFlights = mergeContinuationFlights(flights);
@@ -1296,7 +1401,7 @@ export function calculateMonthlyBreakdown(
     const workDays = countWorkDays(data.flights, data.nonFlightDays, settings);
     
     // Trips
-    const trips = countTrips(data.flights, data.nonFlightDays, settings);
+    const trips = countTrips(data.flights, data.nonFlightDays, settings, detectedHomebase);
     
     // Distance deduction
     const distanceResult = calculateDistanceDeduction(trips, settings.distanceToWork, year);
@@ -1347,7 +1452,8 @@ export function calculateTaxDeduction(
   nonFlightDays: NonFlightDay[],
   settings: Settings,
   reimbursementData: ReimbursementData[],
-  aircraftType?: string
+  aircraftType?: string,
+  detectedHomebase?: 'MUC' | 'FRA' | 'Unknown'
 ): TaxCalculation {
   // Work days for cleaning costs
   const workDays = countWorkDays(flights, nonFlightDays, settings);
@@ -1358,7 +1464,7 @@ export function calculateTaxDeduction(
   const tipsTotal = hotelNights.length * settings.tipPerNight;
   
   // Trips for distance deduction
-  const trips = countTrips(flights, nonFlightDays, settings);
+  const trips = countTrips(flights, nonFlightDays, settings, detectedHomebase);
   
   // Meal allowances - use year from first flight or default
   const year = (flights.length > 0 ? flights[0].year : DEFAULT_ALLOWANCE_YEAR) as AllowanceYear;
