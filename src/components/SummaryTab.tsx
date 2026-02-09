@@ -47,7 +47,7 @@ export function SummaryTab() {
                   Fahrten
                 </th>
                 <th className="text-right py-3 px-4 font-medium text-slate-600 dark:text-slate-300">
-                  Entfernung
+                  Entfernungspauschale
                 </th>
                 <th className="text-right py-3 px-4 font-medium text-slate-600 dark:text-slate-300">
                   Verpflegung
