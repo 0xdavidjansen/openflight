@@ -193,7 +193,7 @@ describe('countTrips', () => {
       createNonFlightDay('2024-01-16', 'ME'),
     ]
     const result = countTrips([], nonFlightDays, defaultSettings)
-    expect(result).toBe(2)
+    expect(result).toBe(4) // 2 ME days * 2 trips each (round trip)
   })
 
   it('adds ground duty days as trips', () => {
@@ -203,7 +203,7 @@ describe('countTrips', () => {
       createNonFlightDay('2024-01-17', 'SI'),
     ]
     const result = countTrips([], nonFlightDays, defaultSettings)
-    expect(result).toBe(3)
+    expect(result).toBe(6) // 3 ground duty days * 2 trips each (round trip)
   })
 })
 

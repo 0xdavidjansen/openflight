@@ -311,7 +311,7 @@ export function countTrips(
   // ME days = round trip (to and from)
   if (settings.countMedicalAsTrip) {
     const meDays = nonFlightDays.filter((d) => d.type === 'ME');
-    trips += meDays.length; // Each ME day = 1 round trip
+    trips += meDays.length * 2; // Each ME day = 2 trips (there and back)
   }
   
   // Ground duty days = round trip
@@ -319,7 +319,7 @@ export function countTrips(
     const groundDays = nonFlightDays.filter((d) =>
       GROUND_DUTY_CODES.includes(d.type as typeof GROUND_DUTY_CODES[number])
     );
-    trips += groundDays.length;
+    trips += groundDays.length * 2; // Each ground duty day = 2 trips (there and back)
   }
   
   return trips;
