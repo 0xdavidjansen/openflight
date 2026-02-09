@@ -103,7 +103,7 @@ describe('countWorkDays', () => {
     distanceToWork: 30,
     cleaningCostPerDay: 1.0,
     tipPerNight: 1.0,
-    countOnlyAFlag: false,
+    countOnlyAFlag: true,
     countMedicalAsTrip: true,
     countGroundDutyAsTrip: true,
     countForeignAsWorkDay: true,
@@ -162,7 +162,7 @@ describe('countTrips', () => {
     distanceToWork: 30,
     cleaningCostPerDay: 1.0,
     tipPerNight: 1.0,
-    countOnlyAFlag: false,
+    countOnlyAFlag: true,
     countMedicalAsTrip: true,
     countGroundDutyAsTrip: true,
     countForeignAsWorkDay: true,
@@ -177,8 +177,8 @@ describe('countTrips', () => {
     expect(result).toBe(2)
   })
 
-  it('counts only A flags when countOnlyAFlag is true', () => {
-    const settings = { ...defaultSettings, countOnlyAFlag: true }
+  it('counts only A flags when countOnlyAFlag is false', () => {
+    const settings = { ...defaultSettings, countOnlyAFlag: false }
     const flights: Flight[] = [
       createFlight('2024-01-15', 'LH100', 'A'),
       createFlight('2024-01-15', 'LH101', 'E'),
@@ -699,7 +699,7 @@ describe('calculateMonthlyBreakdown', () => {
     distanceToWork: 30,
     cleaningCostPerDay: 1.0,
     tipPerNight: 1.0,
-    countOnlyAFlag: false,
+    countOnlyAFlag: true,
     countMedicalAsTrip: true,
     countGroundDutyAsTrip: true,
     countForeignAsWorkDay: true,
@@ -747,7 +747,7 @@ describe('calculateTaxDeduction', () => {
     distanceToWork: 30,
     cleaningCostPerDay: 1.50,
     tipPerNight: 2.00,
-    countOnlyAFlag: false,
+    countOnlyAFlag: true,
     countMedicalAsTrip: true,
     countGroundDutyAsTrip: true,
     countForeignAsWorkDay: true,

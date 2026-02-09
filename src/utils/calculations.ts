@@ -292,9 +292,9 @@ export function countWorkDays(
   for (const day of nonFlightDays) {
     const dateStr = day.date.toISOString().split('T')[0];
     
-    if (day.type === 'ME' && settings.countMedicalAsTrip) {
+    if (day.type === 'ME') {
       nonFlightWorkDates.add(dateStr);
-    } else if (day.type === 'FL' && settings.countForeignAsWorkDay) {
+    } else if (day.type === 'FL') {
       nonFlightWorkDates.add(dateStr);
     } else if (GROUND_DUTY_CODES.includes(day.type as typeof GROUND_DUTY_CODES[number]) && settings.countGroundDutyAsTrip) {
       nonFlightWorkDates.add(dateStr);
@@ -395,9 +395,6 @@ export function countTrips(
   
   // Count A and E flags as trips
   if (settings.countOnlyAFlag) {
-    // Count only A flags (outbound trips to work)
-    trips += flights.filter((f) => f.dutyCode === 'A').length;
-  } else {
     // Count EACH A and E flag as a separate trip
     // A flag = 1 trip (outbound to work)
     // E flag = 1 trip (return from work)
@@ -405,6 +402,9 @@ export function countTrips(
     const aFlags = flights.filter((f) => f.dutyCode === 'A').length;
     const eFlags = flights.filter((f) => f.dutyCode === 'E').length;
     trips += aFlags + eFlags;
+  } else {
+    // Count only A flags (outbound trips to work)
+    trips += flights.filter((f) => f.dutyCode === 'A').length;
   }
   
   // Add same-day round trips (days with A/E flags are already filtered out)
@@ -412,10 +412,8 @@ export function countTrips(
   trips += sameDayRoundTripDates.size * 2;
   
   // ME days = round trip (to and from)
-  if (settings.countMedicalAsTrip) {
-    const meDays = nonFlightDays.filter((d) => d.type === 'ME');
-    trips += meDays.length * 2; // Each ME day = 2 trips (there and back)
-  }
+  const meDays = nonFlightDays.filter((d) => d.type === 'ME');
+  trips += meDays.length * 2; // Each ME day = 2 trips (there and back)
   
   // Ground duty days = round trip (EXCEPT RE - training/simulator never counts)
   if (settings.countGroundDutyAsTrip) {

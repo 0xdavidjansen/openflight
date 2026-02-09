@@ -6,7 +6,7 @@ const DEFAULT_SETTINGS: Settings = {
   distanceToWork: 30,
   cleaningCostPerDay: 1.6,
   tipPerNight: 3.6,
-  countOnlyAFlag: false,
+  countOnlyAFlag: true,
   countMedicalAsTrip: true,
   countGroundDutyAsTrip: true,
   countForeignAsWorkDay: true,

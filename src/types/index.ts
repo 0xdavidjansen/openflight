@@ -64,7 +64,7 @@ export interface Settings {
   fahrzeitMinutesOverride?: number; // Optional: manual override for travel time in minutes (one way)
   cleaningCostPerDay: number; // EUR
   tipPerNight: number; // EUR
-  countOnlyAFlag: boolean; // Only count A-flagged days as trips
+  countOnlyAFlag: boolean; // true = count both A and E flags (2 trips), false = only A flags (1 trip)
   countMedicalAsTrip: boolean; // ME days = round trip
   countGroundDutyAsTrip: boolean; // EM, RE, DP, DT, SI, TK, SB = round trip
   countForeignAsWorkDay: boolean; // FL days as work days

@@ -78,7 +78,7 @@ export function VirtualFlightTable({ flights, nonFlightDays, dailyAllowances }: 
               row.type === 'flight' ? (
                 <FlightRow key={row.data.id} flight={row.data} dailyAllowances={dailyAllowances} isFirstOfDay={row.isFirstOfDay} />
               ) : (
-                <NonFlightDayRow key={row.data.id} day={row.data} dailyAllowances={dailyAllowances} />
+                <NonFlightDayRow key={row.data.id} day={row.data} dailyAllowances={dailyAllowances} flights={flights} />
               )
             )}
           </tbody>
@@ -122,7 +122,7 @@ export function VirtualFlightTable({ flights, nonFlightDays, dailyAllowances }: 
                     {row.type === 'flight' ? (
                       <FlightRowContent flight={row.data} dailyAllowances={dailyAllowances} isFirstOfDay={row.isFirstOfDay} />
                     ) : (
-                      <NonFlightDayRowContent day={row.data} dailyAllowances={dailyAllowances} />
+                      <NonFlightDayRowContent day={row.data} dailyAllowances={dailyAllowances} flights={flights} />
                     )}
                   </tr>
                 );
@@ -269,7 +269,7 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay }: { flight: F
   );
 }
 
-function NonFlightDayRow({ day, dailyAllowances }: { day: NonFlightDay; dailyAllowances?: Map<string, DailyAllowanceInfo> }) {
+function NonFlightDayRow({ day, dailyAllowances, flights }: { day: NonFlightDay; dailyAllowances?: Map<string, DailyAllowanceInfo>; flights: Flight[] }) {
   return (
     <tr
       className={`border-b border-slate-100 dark:border-slate-700/50 ${
@@ -280,18 +280,43 @@ function NonFlightDayRow({ day, dailyAllowances }: { day: NonFlightDay; dailyAll
           : 'bg-green-50/50 dark:bg-green-900/10'
       }`}
     >
-      <NonFlightDayRowContent day={day} dailyAllowances={dailyAllowances} />
+      <NonFlightDayRowContent day={day} dailyAllowances={dailyAllowances} flights={flights} />
     </tr>
   );
 }
 
-function NonFlightDayRowContent({ day, dailyAllowances }: { day: NonFlightDay; dailyAllowances?: Map<string, DailyAllowanceInfo> }) {
+function NonFlightDayRowContent({ day, dailyAllowances, flights }: { day: NonFlightDay; dailyAllowances?: Map<string, DailyAllowanceInfo>; flights: Flight[] }) {
   const year = (day.year || DEFAULT_ALLOWANCE_YEAR) as AllowanceYear;
-  
+
   // Look up the daily allowance for this day
   const dateStr = formatDateStr(day.date);
   const dailyAllowance = dailyAllowances?.get(dateStr);
-  
+
+  // Check if this FL day is after an E-flag (return) flight
+  const isAfterEFlagFlight = () => {
+    if (day.type !== 'FL') return false;
+
+    // Sort flights by date and time
+    const sortedFlights = [...flights].sort((a, b) => {
+      const dateCompare = a.date.getTime() - b.date.getTime();
+      if (dateCompare !== 0) return dateCompare;
+      const parseTime = (time: string) => {
+        const [h, m] = time.split(':').map(Number);
+        return h * 60 + m;
+      };
+      return parseTime(a.departureTime) - parseTime(b.departureTime);
+    });
+
+    // Find the most recent flight before this FL day
+    const dayTime = day.date.getTime();
+    const prevFlights = sortedFlights.filter(f => f.date.getTime() < dayTime);
+
+    if (prevFlights.length === 0) return false;
+
+    const lastFlight = prevFlights[prevFlights.length - 1];
+    return lastFlight.dutyCode === 'E';
+  };
+
   return (
     <>
       <td className="py-2 px-2">
@@ -322,6 +347,8 @@ function NonFlightDayRowContent({ day, dailyAllowances }: { day: NonFlightDay; d
             'Ankunftstag'
           ) : dailyAllowance.isDepartureFromGermanyDay ? (
             'Abreisetag (Abflug von Deutschland)'
+          ) : isAfterEFlagFlight() ? (
+            'Ankunftstag'
           ) : (
             'Layover'
           )

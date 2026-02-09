@@ -35,23 +35,9 @@ export function SettingsTab() {
     [updateSettings]
   );
 
-  const handleCountMedicalAsTripChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      updateSettings({ countMedicalAsTrip: e.target.checked });
-    },
-    [updateSettings]
-  );
-
   const handleCountGroundDutyAsTripChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       updateSettings({ countGroundDutyAsTrip: e.target.checked });
-    },
-    [updateSettings]
-  );
-
-  const handleCountForeignAsWorkDayChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      updateSettings({ countForeignAsWorkDay: e.target.checked });
     },
     [updateSettings]
   );
@@ -205,27 +191,10 @@ export function SettingsTab() {
               />
               <div>
                 <span className="text-slate-700 dark:text-slate-200">
-                  Nur A-Markierung zählen
+                  Hin und Rückweg zählen
                 </span>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Nur Tage mit "zur Arbeit" Kennzeichnung als Fahrten zählen
-                </p>
-              </div>
-            </label>
-
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.countMedicalAsTrip}
-                onChange={handleCountMedicalAsTripChange}
-                className="mt-1 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-              />
-              <div>
-                <span className="text-slate-700 dark:text-slate-200">
-                  Medical als Fahrt zählen (ME)
-                </span>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Medizinische Untersuchungen = Hin- und Rückfahrt
+                  Hin- und Rückfahrten werden jeweils als Fahrt gezählt
                 </p>
               </div>
             </label>
@@ -247,22 +216,6 @@ export function SettingsTab() {
               </div>
             </label>
 
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.countForeignAsWorkDay}
-                onChange={handleCountForeignAsWorkDayChange}
-                className="mt-1 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-              />
-              <div>
-                <span className="text-slate-700 dark:text-slate-200">
-                  Auslandstage als Arbeitstag zählen (FL)
-                </span>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Layover-Tage im Ausland als Arbeitstage werten
-                </p>
-              </div>
-            </label>
           </div>
         </div>
       </section>
