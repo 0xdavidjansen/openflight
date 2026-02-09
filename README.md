@@ -169,12 +169,6 @@ Contributions are welcome! Here's how you can help:
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
-
-- BMF (Bundesministerium der Finanzen) for publishing official tax rates
-- Lufthansa for standardized PDF formats
-- The open-source community for excellent libraries
-
 ## ⚠️ Disclaimer
 
 This calculator is provided for informational purposes only. It does not constitute tax advice. Tax regulations are complex and subject to change. Always consult a qualified Steuerberater (tax advisor) for personalized advice regarding your tax situation.
@@ -183,15 +177,6 @@ This calculator is provided for informational purposes only. It does not constit
 
 - GitHub: [@0xdavidjansen](https://github.com/0xdavidjansen)
 - Issues: [GitHub Issues](https://github.com/0xdavidjansen/openflight/issues)
-
-## 🔮 Roadmap
-
-- [ ] Add shorthaul briefing time configuration
-- [ ] Support for more airlines (PDF format variations)
-- [ ] Multi-year tax return comparison
-- [ ] Export to ELSTER format
-- [ ] Mobile app (PWA improvements)
-- [ ] Multiple language support (English, German)
 
 ---
 
