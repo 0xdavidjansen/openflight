@@ -12,7 +12,7 @@ export const DUTY_CODES = {
   E: 'Fahrt von Arbeit',
   ME: 'Medizinische Untersuchung',
   FL: 'Auslandstag',
-  EM: 'Einsatzmeeting',
+  EM: 'Emergency Schulung',
   RE: 'Reserve',
   DP: 'Dispatch',
   DT: 'Duty Time',

@@ -765,7 +765,7 @@ function getDutyDescription(code: string): string {
   const descriptions: Record<string, string> = {
     ME: 'Medizinische Untersuchung',
     FL: 'Streckeneinsatztag',
-    EM: 'Einsatzmeeting',
+    EM: 'Emergency Schulung',
     RE: 'Reserve',
     DP: 'Dispatch',
     DT: 'Duty Time',
