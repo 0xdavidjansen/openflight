@@ -5,7 +5,7 @@ import { DUTY_CODES } from '../constants';
 import { DEFAULT_ALLOWANCE_YEAR } from '../utils/allowances';
 import { getCountryName } from '../utils/airports';
 import { getCountryAllowance } from '../utils/allowances';
-import { formatCurrency, formatDateStr } from '../utils/calculations';
+import { formatCurrency, formatDateStr, isSimulatorFlight } from '../utils/calculations';
 
 interface VirtualFlightTableProps {
   flights: Flight[];
@@ -180,10 +180,13 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay }: { flight: F
   const departureCountry = flight.departureCountry || 'XX';
   const arrivalCountry = flight.arrivalCountry || 'XX';
   const isDomestic = (country: string) => country === 'DE';
-  
+
   const isReturnFlight = !isDomestic(departureCountry) && isDomestic(arrivalCountry);
   const countryCode = isReturnFlight ? departureCountry : arrivalCountry;
-  
+
+  // Check if this is a simulator flight
+  const isSimulator = isSimulatorFlight(flight);
+
   // Look up the daily allowance for this flight date
   const dateStr = formatDateStr(flight.date);
   const dailyAllowance = dailyAllowances?.get(dateStr);
@@ -199,6 +202,14 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay }: { flight: F
       <td className="py-2 px-2">
         <div className="flex items-center gap-2">
           <span className="font-mono">{flight.flightNumber}</span>
+          {isSimulator && (
+            <span
+              className="px-1.5 py-0.5 text-xs rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400"
+              title="Simulator-Tag (LH9xxx, FRA/FRA oder MUC/MUC, 4:00 Block)"
+            >
+              Simulator
+            </span>
+          )}
           {flight.isContinuation && (
             <span
               className="px-1.5 py-0.5 text-xs rounded bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
@@ -226,8 +237,12 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay }: { flight: F
           )}
         </div>
       </td>
-      <td className="py-2 px-2 font-mono">
-        {flight.departure} → {flight.arrival}
+      <td className="py-2 px-2">
+        {isSimulator ? (
+          <span className="text-slate-500 dark:text-slate-400 italic">Simulator</span>
+        ) : (
+          <span className="font-mono">{flight.departure} → {flight.arrival}</span>
+        )}
       </td>
       <td className="py-2 px-2">
         {flight.departureTime} - {flight.arrivalTime}
@@ -257,7 +272,7 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay }: { flight: F
           )
         ) : (
           // Show blank for subsequent flights on same day with tooltip
-          <span 
+          <span
             className="text-slate-400"
             title="Tagessatz wird beim ersten Flug des Tages angezeigt"
           >

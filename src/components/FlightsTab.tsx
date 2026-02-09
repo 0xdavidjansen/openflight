@@ -1,10 +1,10 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useApp } from '../hooks';
-import { ChevronDown, ChevronRight, Filter, Plane, Calendar, Clock, Euro } from 'lucide-react';
+import { ChevronDown, ChevronRight, Filter, Plane, Calendar, Clock, Euro, Monitor } from 'lucide-react';
 import { MONTH_NAMES } from '../constants';
 import { getCountryName } from '../utils/airports';
 import { VirtualFlightTable } from './VirtualFlightTable';
-import { formatDateStr } from '../utils/calculations';
+import { formatDateStr, isSimulatorFlight } from '../utils/calculations';
 
 interface MonthGroup {
   key: string;
@@ -16,10 +16,13 @@ interface MonthGroup {
   totalAllowance: number;
 }
 
+type SimulatorFilter = 'all' | 'simulator' | 'regular';
+
 export function FlightsTab() {
   const { state, dailyAllowances } = useApp();
   const { flights, nonFlightDays } = state;
   const [countryFilter, setCountryFilter] = useState<string>('all');
+  const [simulatorFilter, setSimulatorFilter] = useState<SimulatorFilter>('all');
 
   // Get unique countries from both departure and arrival
   const countries = useMemo(() => {
@@ -99,11 +102,22 @@ export function FlightsTab() {
 
   // Filter flights - show flights where the selected country is either departure OR arrival
   const filteredFlights = useMemo(() => {
-    if (countryFilter === 'all') return flights;
-    return flights.filter((f) => 
-      f.country === countryFilter || f.departureCountry === countryFilter
-    );
-  }, [flights, countryFilter]);
+    return flights.filter((f) => {
+      // Country filter
+      const countryMatch = countryFilter === 'all' || 
+        f.country === countryFilter || 
+        f.departureCountry === countryFilter;
+
+      // Simulator filter
+      const isSimulator = isSimulatorFlight(f);
+      const simulatorMatch = 
+        simulatorFilter === 'all' || 
+        (simulatorFilter === 'simulator' && isSimulator) ||
+        (simulatorFilter === 'regular' && !isSimulator);
+
+      return countryMatch && simulatorMatch;
+    });
+  }, [flights, countryFilter, simulatorFilter]);
 
   // Toggle month expansion
   const toggleMonth = useCallback((key: string) => {
@@ -146,6 +160,20 @@ export function FlightsTab() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2 justify-end">
+        {/* Simulator Filter */}
+        <div className="flex items-center gap-2">
+          <Monitor className="w-4 h-4 text-slate-500" />
+          <select
+            value={simulatorFilter}
+            onChange={(e) => setSimulatorFilter(e.target.value as SimulatorFilter)}
+            className="px-3 py-1.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm"
+          >
+            <option value="all">Alle Flüge</option>
+            <option value="simulator">Nur Simulator</option>
+            <option value="regular">Nur Reguläre Flüge</option>
+          </select>
+        </div>
+
         {/* Country Filter */}
         <div className="flex items-center gap-2">
           <Filter className="w-4 h-4 text-slate-500" />
@@ -182,16 +210,19 @@ export function FlightsTab() {
           const monthNonFlightDays = nonFlightDays.filter((d) => {
             // Must be in the correct month/year
             if (d.month !== group.month || d.year !== group.year) return false;
-            
+
+            // When showing only simulator flights, don't show any non-flight days
+            if (simulatorFilter === 'simulator') return false;
+
             // If no country filter, show all non-flight days
             if (countryFilter === 'all') return true;
-            
+
             // If country filter is active, only show non-flight days in that country
             // FL (layover) days have a country, others (ME, RE, etc.) are typically in Germany
             return d.country === countryFilter;
           });
 
-          if (countryFilter !== 'all' && monthFlights.length === 0) {
+          if (monthFlights.length === 0) {
             return null;
           }
 

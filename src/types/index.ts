@@ -35,6 +35,7 @@ export interface Flight {
   departureCountry?: string; // Departure airport country code
   arrivalCountry?: string; // Arrival airport country code
   country: string; // Destination country (alias for arrivalCountry for backwards compatibility)
+  isSimulator?: boolean; // True if this is a simulator/training flight (LH9xxx, FRA/FRA or MUC/MUC, 4:00 block)
 }
 
 // Non-flight work day (ground duty, medical, abroad day)

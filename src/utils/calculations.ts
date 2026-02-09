@@ -16,6 +16,7 @@ import {
   LONGHAUL_AIRCRAFT_TYPES,
   BRIEFING_TIME_LONGHAUL_MINUTES,
   BRIEFING_TIME_SHORTHAUL_MINUTES,
+  BRIEFING_TIME_SIMULATOR_MINUTES,
 } from '../constants';
 import { 
   DISTANCE_RATES, 
@@ -35,19 +36,41 @@ import { AIRPORT_TO_CITY_ALLOWANCE } from './allowancesData';
  */
 export function detectHomebase(flights: Flight[]): 'MUC' | 'FRA' | 'Unknown' {
   if (flights.length === 0) return 'Unknown';
-  
+
   let mucCount = 0;
   let fraCount = 0;
-  
+
   flights.forEach(flight => {
     if (flight.departure === 'MUC') mucCount++;
     if (flight.arrival === 'MUC') mucCount++;
     if (flight.departure === 'FRA') fraCount++;
     if (flight.arrival === 'FRA') fraCount++;
   });
-  
+
   if (mucCount === fraCount) return 'Unknown';
   return mucCount > fraCount ? 'MUC' : 'FRA';
+}
+
+/**
+ * Check if a flight is a simulator/training flight
+ * Simulator flights are identified by:
+ * - Flight number starting with LH9 (e.g., LH9001, LH9234)
+ * - Route: FRA → FRA or MUC → MUC (round trip from same German hub)
+ * - Block time: 4:00 (exactly 4 hours)
+ */
+export function isSimulatorFlight(flight: Flight): boolean {
+  // Check flight number starts with LH9
+  const flightNumberMatch = flight.flightNumber.toUpperCase().startsWith('LH9');
+
+  // Check route is FRA→FRA or MUC→MUC
+  const isRoundTripFromHub =
+    (flight.departure === 'FRA' && flight.arrival === 'FRA') ||
+    (flight.departure === 'MUC' && flight.arrival === 'MUC');
+
+  // Check block time is exactly 4:00
+  const blockTimeMatch = flight.blockTime === '4:00';
+
+  return flightNumberMatch && isRoundTripFromHub && blockTimeMatch;
 }
 
 /**
@@ -92,18 +115,27 @@ export function formatDateStr(date: Date): string {
  * Calculate absence duration for departure or return day
  * @param flight The flight
  * @param isDepDay True if departure day, false if return day
- * @param fahrzeitMinutes Travel time to airport in minutes
+ * @param fahrzeitMinutes Travel time to airport in minutes (one way)
  * @param briefingMinutes Briefing time before departure in minutes (only applied on departure day for outbound flights)
+ * @param postBriefingMinutes Briefing time after arrival in minutes (for simulator flights)
  */
-export function calculateAbsenceDuration(flight: Flight, isDepDay: boolean, fahrzeitMinutes: number, briefingMinutes: number = 0): number {
+export function calculateAbsenceDuration(
+  flight: Flight,
+  isDepDay: boolean,
+  fahrzeitMinutes: number,
+  briefingMinutes: number = 0,
+  postBriefingMinutes: number = 0
+): number {
   const fahrzeit = fahrzeitMinutes / 60;
   const briefing = briefingMinutes / 60;
+  const postBriefing = postBriefingMinutes / 60;
+
   if (isDepDay) {
     const depHour = parseTimeToHours(flight.departureTime);
-    
+
     // Absence starts at: departureTime - briefingTime - fahrzeit
     // So total = (24 - depHour) + briefing + fahrzeit
-    
+
     // For overnight flights departing from Germany:
     // Count from departure through midnight into the next day's arrival
     if (checkOvernightFlight(flight)) {
@@ -114,7 +146,8 @@ export function calculateAbsenceDuration(flight: Flight, isDepDay: boolean, fahr
       return (24 - depHour) + arrHour + briefing + fahrzeit;
     } else {
       // Single-day flight: only count departure day hours
-      return (24 - depHour) + briefing + fahrzeit;
+      // For simulator flights: add post-briefing time (spent at airport after flight)
+      return (24 - depHour) + briefing + fahrzeit + postBriefing;
     }
   } else {
     const arrHour = parseTimeToHours(flight.arrivalTime);
@@ -167,6 +200,20 @@ export function getBriefingTimeMinutes(aircraftType?: string): number {
     return BRIEFING_TIME_LONGHAUL_MINUTES;
   }
   return BRIEFING_TIME_SHORTHAUL_MINUTES;
+}
+
+/**
+ * Get simulator briefing time in minutes.
+ * Simulator flights have 60min pre-briefing + 60min post-briefing = 120min total.
+ * @returns Object with preBriefing and postBriefing times in minutes
+ */
+export function getSimulatorBriefingTimeMinutes(): { preBriefing: number; postBriefing: number } {
+  // Split the total 120 minutes evenly: 60min before + 60min after
+  const halfTime = BRIEFING_TIME_SIMULATOR_MINUTES / 2;
+  return {
+    preBriefing: halfTime,
+    postBriefing: halfTime
+  };
 }
 
 /**
@@ -1183,40 +1230,58 @@ export function calculateDailyAllowances(
   for (const [dateStr, dayFlights] of flightsByDate) {
     // Skip if already has an allowance (e.g., from abroad period or non-flight day)
     if (dailyAllowances.has(dateStr)) continue;
-    
+
     // Check that ALL flights on this day are domestic (both departure and arrival are DE)
-    const allDomestic = dayFlights.every(f => 
-      isDomestic(getCountryFromAirport(f.departure)) && 
+    const allDomestic = dayFlights.every(f =>
+      isDomestic(getCountryFromAirport(f.departure)) &&
       isDomestic(getCountryFromAirport(f.arrival))
     );
-    
+
     if (!allDomestic) continue; // Skip if any flight is foreign (already handled by abroad periods)
-    
+
+    // Check if any flight on this day is a simulator flight
+    const hasSimulatorFlight = dayFlights.some(f => isSimulatorFlight(f));
+
     // Calculate total absence duration
     // Find earliest departure and latest arrival
     let earliestDepMinutes = Infinity;
     let latestArrMinutes = -Infinity;
-    
+
     for (const flight of dayFlights) {
       const depMinutes = parseTimeToMinutes(flight.departureTime);
       const arrMinutes = parseTimeToMinutes(flight.arrivalTime);
-      
+
       earliestDepMinutes = Math.min(earliestDepMinutes, depMinutes);
       latestArrMinutes = Math.max(latestArrMinutes, arrMinutes);
     }
-    
+
     // Add Fahrzeit and briefing time to departure end, Fahrzeit to arrival end
     const fahrzeitHours = fahrzeitMinutes / 60;
-    const briefingHours = briefingMinutes / 60;
     const earliestDepHours = earliestDepMinutes / 60;
     const latestArrHours = latestArrMinutes / 60;
+
+    let absenceHours: number;
+
+    if (hasSimulatorFlight) {
+      // Simulator flights: 60min pre-briefing + 60min post-briefing
+      const { preBriefing, postBriefing } = getSimulatorBriefingTimeMinutes();
+      const preBriefingHours = preBriefing / 60;
+      const postBriefingHours = postBriefing / 60;
+
+      // Total absence = (latest arrival + postBriefing + Fahrzeit) - (earliest departure - preBriefing - Fahrzeit)
+      // Pilot leaves home, travels to airport (Fahrzeit), does pre-briefing, flies, does post-briefing, travels home
+      absenceHours = (latestArrHours + postBriefingHours + fahrzeitHours) - (earliestDepHours - preBriefingHours - fahrzeitHours);
+    } else {
+      // Regular flights: use standard briefing time
+      const briefingHours = briefingMinutes / 60;
+
+      // Total absence = (latest arrival + Fahrzeit) - (earliest departure - briefing - Fahrzeit)
+      // Pilot leaves home, travels to airport (Fahrzeit), does briefing, then departs
+      absenceHours = (latestArrHours + fahrzeitHours) - (earliestDepHours - briefingHours - fahrzeitHours);
+    }
     
-    // Total absence = (latest arrival + Fahrzeit) - (earliest departure - briefing - Fahrzeit)
-    // Pilot leaves home, travels to airport (Fahrzeit), does briefing, then departs
-    const absenceHours = (latestArrHours + fahrzeitHours) - (earliestDepHours - briefingHours - fahrzeitHours);
-    
-    // Only assign allowance if absence > 8 hours
-    if (absenceHours > 8) {
+    // Only assign allowance if absence >= 8 hours (German tax law: >8h means 8h or more)
+    if (absenceHours >= 8) {
       const yearForDay = dayFlights[0].year;
       const domesticRates = getDomesticRates(yearForDay as AllowanceYear);
       
