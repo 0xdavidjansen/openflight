@@ -770,7 +770,7 @@ function getDutyDescription(code: string): string {
     DP: 'Dispatch',
     DT: 'Duty Time',
     SI: 'Simulator Training',
-    TK: 'Technikkurs',
+    TK: 'Training Kurzschulung',
     SB: 'Standby',
     A: 'Fahrt zur Arbeit',
     E: 'Fahrt von Arbeit',

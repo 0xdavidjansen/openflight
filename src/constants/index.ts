@@ -17,7 +17,7 @@ export const DUTY_CODES = {
   DP: 'Dispatch',
   DT: 'Duty Time',
   SI: 'Simulator',
-  TK: 'Technikkurs',
+  TK: 'Training Kurzschulung',
   SB: 'Standby'
 } as const;
 
