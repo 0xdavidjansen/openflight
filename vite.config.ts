@@ -43,6 +43,7 @@ export default defineConfig({
         clientsClaim: true,
         skipWaiting: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3MB to accommodate pdfmake
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/unpkg\.com\/.*/i,
@@ -80,6 +81,7 @@ export default defineConfig({
           'vendor-react': ['react', 'react-dom'],
           'vendor-pdfjs': ['pdfjs-dist'],
           'vendor-icons': ['lucide-react'],
+          'vendor-pdfmake': ['pdfmake'],
         },
       },
     },
