@@ -847,6 +847,37 @@ export const AIRPORT_TO_CITY_ALLOWANCE: Record<string, string> = {
   'YVR': 'Kanada - Vancouver',
 };
 
+// Shorthaul country codes (Europe + Near East/North Africa)
+// These destinations are typically operated as shorthaul routes
+const SHORTHAUL_COUNTRIES = new Set([
+  // Germany
+  'DE',
+  // EU Countries
+  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'GR', 'HU', 'IE', 'IT', 
+  'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE',
+  // UK & EFTA
+  'GB', 'CH', 'NO', 'IS', 'LI',
+  // Eastern Europe
+  'AL', 'BA', 'XK', 'MD', 'ME', 'MK', 'RS', 'UA', 'BY',
+  // Mediterranean & Near East
+  'TR', 'IL', 'CY',
+  // North Africa
+  'MA', 'DZ', 'TN', 'EG', 'LY',
+  // Russia (western cities only - Moscow, St. Petersburg)
+  'RU', // Will be shorthaul by default, actual distance should be checked if needed
+]);
+
+/**
+ * Determine if a destination is typically a shorthaul or longhaul operation
+ * based on geographic location.
+ * @param countryCode ISO country code (e.g., 'US', 'FR', 'CN')
+ * @returns 'shorthaul' for European/nearby destinations, 'longhaul' for intercontinental
+ */
+export function getFlightTypeByCountry(countryCode: string): 'shorthaul' | 'longhaul' {
+  const code = countryCode?.toUpperCase() || '';
+  return SHORTHAUL_COUNTRIES.has(code) ? 'shorthaul' : 'longhaul';
+}
+
 // Normalize country name for allowance lookup
 export function normalizeCountryName(country: string): string {
   if (!country) return 'Deutschland';

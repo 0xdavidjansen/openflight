@@ -25,6 +25,7 @@ import {
   getDomesticRates,
   isDomestic,
   DEFAULT_ALLOWANCE_YEAR,
+  getFlightTypeByCountry,
 } from './allowances';
 import { getCountryFromAirport, getCountryName } from './airports';
 import { AIRPORT_TO_CITY_ALLOWANCE } from './allowancesData';
@@ -214,6 +215,74 @@ export function getSimulatorBriefingTimeMinutes(): { preBriefing: number; postBr
     preBriefing: halfTime,
     postBriefing: halfTime
   };
+}
+
+/**
+ * Get briefing time in minutes based on crew role, aircraft type, and destination.
+ * Flight crew (cockpit): Determined by aircraft type
+ *   - Longhaul aircraft: 110min
+ *   - Shorthaul aircraft: 80min
+ * Cabin crew: Determined by destination
+ *   - Longhaul destinations (intercontinental): 110min
+ *   - Shorthaul destinations (Europe/nearby): 85min
+ * @param role The crew role (e.g., "FO / COCKPIT", "CPT", "FB / CABIN", "PU / CABIN")
+ * @param aircraftType The aircraft type (Muster)
+ * @param destination Optional destination airport code (IATA) - used for cabin crew classification
+ * @returns Pre-flight briefing time in minutes
+ */
+export function getBriefingTimeForRole(
+  role: string | undefined,
+  aircraftType: string | undefined,
+  destination?: string
+): number {
+  if (!role) {
+    return 0;
+  }
+  
+  const normalizedRole = role.toLowerCase().trim();
+  
+  // Check for flight crew (pilots)
+  // Handles formats like "FO / COCKPIT", "FO", "CPT", "Kapitän", etc.
+  const isFlightCrew = 
+    normalizedRole.startsWith('fo') ||
+    normalizedRole.startsWith('cpt') ||
+    normalizedRole.includes('cockpit') ||
+    normalizedRole.includes('offizier') ||
+    normalizedRole.includes('kapitän') ||
+    normalizedRole.includes('kapitan') ||
+    normalizedRole.includes('flugkapitän');
+  
+  // Check for cabin crew
+  // Handles formats like "FB / CABIN", "PU / CABIN", "FB", "PU", "Flugbegleiter", "Purser", etc.
+  const isCabinCrew = 
+    normalizedRole.includes('cabin') ||
+    normalizedRole.startsWith('fb') ||
+    normalizedRole.startsWith('pu') ||
+    normalizedRole.includes('flugbegleiter') ||
+    normalizedRole.includes('purser') ||
+    normalizedRole.includes('kabine');
+  
+  if (isFlightCrew) {
+    // Flight crew: use aircraft type to determine briefing time
+    if (!aircraftType) return 0;
+    const isLonghaulAircraft = isLonghaul(aircraftType);
+    return isLonghaulAircraft ? 110 : 80;
+  } else if (isCabinCrew) {
+    // Cabin crew: use destination to determine briefing time
+    if (!destination) {
+      // Fallback to aircraft type if destination is not available
+      if (!aircraftType) return 0;
+      const isLonghaulAircraft = isLonghaul(aircraftType);
+      return isLonghaulAircraft ? 110 : 85;
+    }
+    
+    // Get the country code from the destination airport
+    const countryCode = getCountryFromAirport(destination);
+    const flightType = getFlightTypeByCountry(countryCode);
+    return flightType === 'longhaul' ? 110 : 85;
+  }
+  
+  return 0;
 }
 
 /**
@@ -462,11 +531,11 @@ export function countTrips(
   const meDays = nonFlightDays.filter((d) => d.type === 'ME');
   trips += meDays.length * 2; // Each ME day = 2 trips (there and back)
   
-  // Ground duty days = round trip (EXCEPT RE - training/simulator never counts)
+  // Ground duty days = round trip (EXCEPT RE/RB - reserve/rufbereitschaft never counts)
   if (settings.countGroundDutyAsTrip) {
     const groundDays = nonFlightDays.filter((d) =>
       GROUND_DUTY_CODES.includes(d.type as typeof GROUND_DUTY_CODES[number]) &&
-      d.type !== 'RE'  // RE (training/simulator) never counts as trips
+      d.type !== 'RE' && d.type !== 'RB'  // RE/RB never counts as trips
     );
     trips += groundDays.length * 2; // Each ground duty day = 2 trips (there and back)
   }
@@ -731,9 +800,9 @@ export function calculateDailyAllowances(
   // @ts-expect-error - year parameter kept for backwards compatibility but actual years are determined from flight/day dates
   year: AllowanceYear,
   fahrzeitMinutes: number = 0,
-  aircraftType?: string
+  aircraftType?: string,
+  role?: string
 ): Map<string, import('../types').DailyAllowanceInfo> {
-  const briefingMinutes = getBriefingTimeMinutes(aircraftType);
   const dailyAllowances = new Map<string, import('../types').DailyAllowanceInfo>();
   
   // First pass: identify all abroad periods with their flights
@@ -920,7 +989,9 @@ export function calculateDailyAllowances(
         hasFlights: false,
         isDepartureFromGermanyDay: false,
         isReturnToGermanyDay: false,
-        isFromFLStatus: true
+        isFromFLStatus: true,
+        briefingMinutes: 0,
+        isLonghaul: false
       });
       console.log('Added allowance for FL abroad day not covered by periods:', dateStr, abroadDay);
     }
@@ -1072,12 +1143,18 @@ export function calculateDailyAllowances(
       // Get rates for this country and year
       const rates = getDailyAllowanceRates(country, yearForDay as AllowanceYear);
       
+      // Calculate briefing time for this period (based on first flight's duty code and destination)
+      const firstFlight = period.flights[0];
+      const briefingMinutes = firstFlight.dutyCode === 'A' 
+        ? getBriefingTimeForRole(role, aircraftType, firstFlight.arrival)
+        : 0;
+      
       // Determine rate type according to German tax law
       let rate: number, rateType: '24h' | 'An/Ab' | 'none';
       
       if (isDepartureFromGermanyDay) {
-        const absenceHours = calculateAbsenceDuration(period.flights[0], true, fahrzeitMinutes, briefingMinutes);
-        console.log(`Departure day absence: ${absenceHours} hours (briefing: ${briefingMinutes}min)`);
+        const absenceHours = calculateAbsenceDuration(firstFlight, true, fahrzeitMinutes, briefingMinutes);
+        console.log(`Departure day absence: ${absenceHours} hours (briefing: ${briefingMinutes}min, dutyCode: ${firstFlight.dutyCode})`);
         if (absenceHours >= 8) {
           rate = rates[1];
           rateType = 'An/Ab';
@@ -1130,7 +1207,9 @@ export function calculateDailyAllowances(
         isLastDay,
         hasFlights: hasAnyFlightActivity,
         isDepartureFromGermanyDay: isDepartureFromGermanyDay || false,
-        isReturnToGermanyDay: isReturnToGermanyDay || false
+        isReturnToGermanyDay: isReturnToGermanyDay || false,
+        briefingMinutes,
+        isLonghaul: isLonghaul(aircraftType)
       });
       
       console.log(`[DEBUG] Allowance set for ${dateStr}:`, {
@@ -1170,7 +1249,9 @@ export function calculateDailyAllowances(
             isLastDay: false,
             hasFlights: true,
             isDepartureFromGermanyDay: false,
-            isReturnToGermanyDay: true
+            isReturnToGermanyDay: true,
+            briefingMinutes: 0,
+            isLonghaul: false
           });
           
           console.log(`Added arrival day allowance for overnight return: ${arrivalDateStr} - ${rates[1]}€ (${period.returnCountry})`);
@@ -1181,7 +1262,7 @@ export function calculateDailyAllowances(
   
   // Fourth pass: Add domestic ground duty days that qualify for allowances
   // Only ME (Medical), SB (Standby), and EM (Emergency Training) get partial rate (8h)
-  // RE, DP, DT, SI, TK do NOT get meal allowances
+  // RE, RB, DP, DT, SI, TK do NOT get meal allowances
   for (const day of nonFlightDays) {
     // Skip FL days (already handled) and days that are already in the map
     if (day.type === 'FL') continue;
@@ -1207,7 +1288,9 @@ export function calculateDailyAllowances(
       isLastDay: false,
       hasFlights: false,
       isDepartureFromGermanyDay: false,
-      isReturnToGermanyDay: false
+      isReturnToGermanyDay: false,
+      briefingMinutes: 0,
+      isLonghaul: false
     });
     
     console.log(`Added partial rate allowance for ${day.type} day:`, dateStr, domesticRates.RATE_8H);
@@ -1260,6 +1343,15 @@ export function calculateDailyAllowances(
     const earliestDepHours = earliestDepMinutes / 60;
     const latestArrHours = latestArrMinutes / 60;
 
+    // Calculate briefing time based on duty code (for non-simulator flights)
+    // Check if any flight on this day has duty code 'A'
+    const hasAFlag = dayFlights.some(f => f.dutyCode === 'A');
+    // For domestic days, use the first flight's arrival as destination for briefing calculation
+    const firstFlight = dayFlights[0];
+    const briefingMinutes = hasAFlag 
+      ? getBriefingTimeForRole(role, aircraftType, firstFlight.arrival)
+      : 0;
+
     let absenceHours: number;
 
     if (hasSimulatorFlight) {
@@ -1272,7 +1364,7 @@ export function calculateDailyAllowances(
       // Pilot leaves home, travels to airport (Fahrzeit), does pre-briefing, flies, does post-briefing, travels home
       absenceHours = (latestArrHours + postBriefingHours + fahrzeitHours) - (earliestDepHours - preBriefingHours - fahrzeitHours);
     } else {
-      // Regular flights: use standard briefing time
+      // Regular flights: use calculated briefing time
       const briefingHours = briefingMinutes / 60;
 
       // Total absence = (latest arrival + Fahrzeit) - (earliest departure - briefing - Fahrzeit)
@@ -1300,7 +1392,9 @@ export function calculateDailyAllowances(
         isLastDay: false,
         hasFlights: true,
         isDepartureFromGermanyDay: false,
-        isReturnToGermanyDay: false
+        isReturnToGermanyDay: false,
+        briefingMinutes,
+        isLonghaul: isLonghaul(aircraftType)
       });
       
       console.log(`Added domestic flight day allowance for ${dateStr}: absence=${absenceHours.toFixed(2)}h, rate=${rate}€`);
@@ -1320,7 +1414,8 @@ export function calculateMealAllowances(
   nonFlightDays: NonFlightDay[],
   year: AllowanceYear = DEFAULT_ALLOWANCE_YEAR,
   fahrzeitMinutes: number = 0,
-  aircraftType?: string
+  aircraftType?: string,
+  role?: string
 ): {
   domestic8h: { days: number; rate: number; total: number };
   domestic24h: { days: number; rate: number; total: number };
@@ -1338,7 +1433,7 @@ export function calculateMealAllowances(
   });
   
   // Use the new daily allowance calculation
-  const dailyAllowances = calculateDailyAllowances(sortedFlights, nonFlightDays, year, fahrzeitMinutes, aircraftType);
+  const dailyAllowances = calculateDailyAllowances(sortedFlights, nonFlightDays, year, fahrzeitMinutes, aircraftType, role);
   
   const domesticRates = getDomesticRates(year);
   let domestic8hDays = 0;
@@ -1516,7 +1611,8 @@ export function calculateTaxDeduction(
   settings: Settings,
   reimbursementData: ReimbursementData[],
   aircraftType?: string,
-  detectedHomebase?: 'MUC' | 'FRA' | 'Unknown'
+  detectedHomebase?: 'MUC' | 'FRA' | 'Unknown',
+  role?: string
 ): TaxCalculation {
   // Work days for cleaning costs
   const workDays = countWorkDays(flights, nonFlightDays, settings);
@@ -1533,7 +1629,7 @@ export function calculateTaxDeduction(
   const year = (flights.length > 0 ? flights[0].year : DEFAULT_ALLOWANCE_YEAR) as AllowanceYear;
   const distanceResult = calculateDistanceDeduction(trips, settings.distanceToWork, year);
   const fahrzeitMinutes = getFahrzeitMinutes(settings);
-  const mealResult = calculateMealAllowances(flights, nonFlightDays, year, fahrzeitMinutes, aircraftType);
+  const mealResult = calculateMealAllowances(flights, nonFlightDays, year, fahrzeitMinutes, aircraftType, role);
   
   // Employer reimbursement from Streckeneinsatzabrechnung
   const employerReimbursement = reimbursementData.reduce(

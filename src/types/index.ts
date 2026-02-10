@@ -29,7 +29,7 @@ export interface Flight {
   departureTime: string; // HH:MM
   arrivalTime: string; // HH:MM
   blockTime: string; // HH:MM flight duration
-  dutyCode?: string; // A, E, ME, FL, EM, RE, DP, DT, SI, TK, SB
+  dutyCode?: string; // A, E, ME, FL, EM, RE, RB, DP, DT, SI, TK, SB
   isContinuation: boolean; // Flight with /XX suffix
   continuationOf?: string; // Parent flight number if continuation
   departureCountry?: string; // Departure airport country code
@@ -44,7 +44,7 @@ export interface NonFlightDay {
   date: Date;
   month: number;
   year: number;
-  type: 'ME' | 'FL' | 'EM' | 'RE' | 'DP' | 'DT' | 'SI' | 'TK' | 'SB';
+  type: 'ME' | 'FL' | 'EM' | 'RE' | 'RB' | 'DP' | 'DT' | 'SI' | 'TK' | 'SB';
   description: string;
   country?: string;
 }
@@ -112,6 +112,8 @@ export interface DailyAllowanceInfo {
   isDepartureFromGermanyDay: boolean;
   isReturnToGermanyDay: boolean;
   isFromFLStatus?: boolean;
+  briefingMinutes?: number; // Briefing time applied to this day (0 if none)
+  isLonghaul?: boolean; // Flag indicating if this is a longhaul flight day
 }
 
 // Abroad period tracking
@@ -239,6 +241,7 @@ export interface CountryAllowance {
   countryCode: string;
   rate8h: number; // Partial day rate (>8h)
   rate24h: number; // Full day rate (24h)
+  flightType: 'shorthaul' | 'longhaul'; // Flight operation type for this destination
 }
 
 // Domestic German allowance rates by year

@@ -8,11 +8,12 @@ import {
   DEFAULT_ALLOWANCE_YEAR,
   AIRPORT_TO_CITY_ALLOWANCE,
   normalizeCountryName,
+  getFlightTypeByCountry,
 } from './allowancesData';
 import { getCountryFromAirport } from './airports';
 
 // Re-export for backwards compatibility
-export { normalizeCountryName, isYearSupported, DEFAULT_ALLOWANCE_YEAR } from './allowancesData';
+export { normalizeCountryName, isYearSupported, DEFAULT_ALLOWANCE_YEAR, getFlightTypeByCountry } from './allowancesData';
 
 // Distance deduction rates (Entfernungspauschale)
 export interface DistanceRates {
@@ -61,11 +62,13 @@ export function getCountryAllowancesByYear(year: AllowanceYear = DEFAULT_ALLOWAN
   const allowances: CountryAllowance[] = [];
   for (const [country, rates] of Object.entries(allowanceTable)) {
     const rateTuple = rates as [number, number];
+    const countryCode = getCountryCodeFromName(country);
     allowances.push({
       country,
-      countryCode: getCountryCodeFromName(country),
+      countryCode,
       rate8h: rateTuple[1], // partialDay
       rate24h: rateTuple[0], // fullDay
+      flightType: getFlightTypeByCountry(countryCode),
     });
   }
   return allowances;
@@ -277,6 +280,7 @@ export function getCountryAllowance(countryCode: string, year: AllowanceYear = D
         countryCode: normalizedCode,
         rate8h: rateTuple[1],
         rate24h: rateTuple[0],
+        flightType: getFlightTypeByCountry(normalizedCode),
       };
     }
   }
@@ -287,6 +291,7 @@ export function getCountryAllowance(countryCode: string, year: AllowanceYear = D
     countryCode: normalizedCode,
     rate8h: DEFAULT_FOREIGN_RATE.rate8h,
     rate24h: DEFAULT_FOREIGN_RATE.rate24h,
+    flightType: getFlightTypeByCountry(normalizedCode),
   };
 }
 
@@ -301,11 +306,13 @@ export function getCountryAllowanceByName(countryName: string, year: AllowanceYe
   const exactMatch = allowanceTable[normalizedName];
   if (exactMatch) {
     const rateTuple = exactMatch as [number, number];
+    const countryCode = getCountryCodeFromName(normalizedName);
     return {
       country: normalizedName,
-      countryCode: getCountryCodeFromName(normalizedName),
+      countryCode,
       rate8h: rateTuple[1],
       rate24h: rateTuple[0],
+      flightType: getFlightTypeByCountry(countryCode),
     };
   }
   
@@ -313,11 +320,13 @@ export function getCountryAllowanceByName(countryName: string, year: AllowanceYe
   for (const [country, rates] of Object.entries(allowanceTable)) {
     if (country.toLowerCase() === normalizedName.toLowerCase()) {
       const rateTuple = rates as [number, number];
+      const countryCode = getCountryCodeFromName(country);
       return {
         country,
-        countryCode: getCountryCodeFromName(country),
+        countryCode,
         rate8h: rateTuple[1],
         rate24h: rateTuple[0],
+        flightType: getFlightTypeByCountry(countryCode),
       };
     }
   }
@@ -328,6 +337,7 @@ export function getCountryAllowanceByName(countryName: string, year: AllowanceYe
     countryCode: 'XX',
     rate8h: DEFAULT_FOREIGN_RATE.rate8h,
     rate24h: DEFAULT_FOREIGN_RATE.rate24h,
+    flightType: 'longhaul', // Unknown destinations default to longhaul
   };
 }
 
@@ -345,11 +355,13 @@ export function getAllowanceByAirport(iataCode: string, year: AllowanceYear = DE
     const rates = allowanceTable[citySpecificKey];
     if (rates) {
       const rateTuple = rates as [number, number];
+      const countryCode = getCountryCodeFromName(citySpecificKey);
       return {
         country: citySpecificKey,
-        countryCode: getCountryCodeFromName(citySpecificKey),
+        countryCode,
         rate8h: rateTuple[1],
         rate24h: rateTuple[0],
+        flightType: getFlightTypeByCountry(countryCode),
       };
     }
   }
