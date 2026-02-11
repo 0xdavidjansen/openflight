@@ -71,7 +71,7 @@ export function VirtualFlightTable({ flights, nonFlightDays, dailyAllowances }: 
   if (rows.length < 50) {
     return (
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <table className="w-full text-sm border-collapse">
           <TableHeader />
           <tbody>
             {rows.map((row) =>
@@ -103,7 +103,7 @@ export function VirtualFlightTable({ flights, nonFlightDays, dailyAllowances }: 
             position: 'relative',
           }}
         >
-          <table className="w-full text-sm">
+        <table className="w-full text-sm border-collapse">
             <tbody>
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                 const row = rows[virtualRow.index];
@@ -139,8 +139,11 @@ function TableHeader() {
   return (
     <thead>
       <tr className="border-b border-slate-200 dark:border-slate-700">
-        <th className="text-left py-2 px-2 font-medium text-slate-600 dark:text-slate-300">
+        <th className="text-left py-2 pl-2 pr-0 font-medium text-slate-600 dark:text-slate-300">
           Datum
+        </th>
+        <th className="text-left py-0 px-0 font-medium text-slate-600 dark:text-slate-300 w-0">
+          Briefing
         </th>
         <th className="text-left py-2 px-2 font-medium text-slate-600 dark:text-slate-300">
           Flug/Status
@@ -174,15 +177,8 @@ function FlightRow({ flight, dailyAllowances, isFirstOfDay }: { flight: Flight; 
 }
 
 function FlightRowContent({ flight, dailyAllowances, isFirstOfDay }: { flight: Flight; dailyAllowances?: Map<string, DailyAllowanceInfo>; isFirstOfDay: boolean }) {
-  // Determine the country to display based on return flight logic
-  // For return flights to Germany (departure not DE, arrival is DE), use departure country
-  // This matches the calculation logic in calculations.ts
-  const departureCountry = flight.departureCountry || 'XX';
-  const arrivalCountry = flight.arrivalCountry || 'XX';
-  const isDomestic = (country: string) => country === 'DE';
-
-  const isReturnFlight = !isDomestic(departureCountry) && isDomestic(arrivalCountry);
-  const countryCode = isReturnFlight ? departureCountry : arrivalCountry;
+  // Use arrival country for display
+  const countryCode = flight.arrivalCountry || 'XX';
 
   // Check if this is a simulator flight
   const isSimulator = isSimulatorFlight(flight);
@@ -193,11 +189,21 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay }: { flight: F
 
   return (
     <>
-      <td className="py-2 px-2">
+      <td className="py-2 pl-2 pr-0">
         {flight.date.toLocaleDateString('de-DE', {
           day: '2-digit',
           month: '2-digit',
         })}
+      </td>
+      <td className="py-0 px-0 w-0 whitespace-nowrap">
+        {dailyAllowance && dailyAllowance.briefingMinutes && dailyAllowance.briefingMinutes > 0 && flight.dutyCode === 'A' && (
+          <span
+            className="px-1.5 py-0.5 text-xs rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
+            title={`Briefing: ${dailyAllowance.briefingMinutes} Minuten`}
+          >
+            📋 {dailyAllowance.briefingMinutes}min
+          </span>
+        )}
       </td>
       <td className="py-2 px-2">
         <div className="flex items-center gap-2">
@@ -205,9 +211,9 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay }: { flight: F
           {isSimulator && (
             <span
               className="px-1.5 py-0.5 text-xs rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400"
-              title="Simulator-Tag (LH9xxx, FRA/FRA oder MUC/MUC, 4:00 Block)"
+              title="Simulator-Tag (LH9xxx, FRA→FRA oder MUC→MUC, 4:00 Block) - Briefing: 60min vor + 60min nach = 120min gesamt"
             >
-              Simulator
+              Simulator (60min + 60min)
             </span>
           )}
           {flight.isContinuation && (
@@ -334,11 +340,14 @@ function NonFlightDayRowContent({ day, dailyAllowances, flights }: { day: NonFli
 
   return (
     <>
-      <td className="py-2 px-2">
+      <td className="py-2 pl-2 pr-0">
         {day.date.toLocaleDateString('de-DE', {
           day: '2-digit',
           month: '2-digit',
         })}
+      </td>
+      <td className="py-0 px-0 w-0">
+        {/* Empty briefing column for non-flight days */}
       </td>
       <td className="py-2 px-2">
         <span
@@ -358,10 +367,10 @@ function NonFlightDayRowContent({ day, dailyAllowances, flights }: { day: NonFli
         colSpan={3}
       >
         {day.type === 'FL' && dailyAllowance ? (
-          dailyAllowance.isReturnToGermanyDay ? (
+          dailyAllowance.isReturnToHomeBase ? (
             'Ankunftstag'
-          ) : dailyAllowance.isDepartureFromGermanyDay ? (
-            'Abreisetag (Abflug von Deutschland)'
+          ) : dailyAllowance.isDepartureFromHomeBase ? (
+            'Abreisetag'
           ) : isAfterEFlagFlight() ? (
             'Ankunftstag'
           ) : (

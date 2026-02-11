@@ -7,10 +7,10 @@ export function SettingsTab() {
   const { state, updateSettings } = useApp();
   const { settings, personalInfo, flights } = state;
 
-  // Calculate final homebase for display
-  const detectedHomebase = useMemo(() => {
-    return personalInfo?.detectedHomebase ?? 'Unknown';
-  }, [personalInfo?.detectedHomebase]);
+  // Get homebase for display (parsed takes precedence over detected)
+  const homebase = useMemo(() => {
+    return personalInfo?.parsedHomebase ?? personalInfo?.detectedHomebase ?? 'Unknown';
+  }, [personalInfo?.parsedHomebase, personalInfo?.detectedHomebase]);
 
   // Get year range - memoized
   const yearRange = useMemo(() => {
@@ -64,18 +64,6 @@ export function SettingsTab() {
         updateSettings({ fahrzeitMinutesOverride: undefined });
       } else {
         updateSettings({ fahrzeitMinutesOverride: parseFloat(value) || 0 });
-      }
-    },
-    [updateSettings]
-  );
-
-  const handleHomebaseOverrideChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const value = e.target.value;
-      if (value === '') {
-        updateSettings({ homebaseOverride: null });
-      } else {
-        updateSettings({ homebaseOverride: value as 'MUC' | 'FRA' });
       }
     },
     [updateSettings]
@@ -394,30 +382,16 @@ export function SettingsTab() {
                 </div>
               )}
               
-              {/* Homebase Override Section */}
+              {/* Homebase Section */}
               <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                <div className="flex items-center gap-3 mb-3">
+                <div className="flex items-center gap-3">
                   <Plane className="w-4 h-4 text-slate-400" />
-                  <div className="flex-1">
+                  <div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">Homebase</p>
-                    <p className="text-sm font-medium text-slate-800 dark:text-white">
-                      Automatisch erkannt: {detectedHomebase === 'Unknown' ? 'Unbekannt' : detectedHomebase}
+                    <p className="font-medium text-slate-800 dark:text-white">
+                      {homebase === 'Unknown' ? 'Unbekannt' : homebase}
                     </p>
                   </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-200 mb-2">
-                    Homebase überschreiben (optional):
-                  </label>
-                  <select
-                    value={settings.homebaseOverride ?? ''}
-                    onChange={handleHomebaseOverrideChange}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
-                  >
-                    <option value="">Automatisch</option>
-                    <option value="MUC">MUC (München)</option>
-                    <option value="FRA">FRA (Frankfurt)</option>
-                  </select>
                 </div>
               </div>
 

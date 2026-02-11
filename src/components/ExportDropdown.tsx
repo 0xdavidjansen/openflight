@@ -215,28 +215,21 @@ export function ExportDropdown() {
     ]);
     
     // Add meal allowance breakdown
-    if (taxCalculation.mealAllowances.domestic8h.days > 0) {
-      rows.push([
-        'Verpflegung Inland > 8h',
-        `${taxCalculation.mealAllowances.domestic8h.days} Tage × ${formatCurrencyGerman(taxCalculation.mealAllowances.domestic8h.rate)} €`,
-        formatCurrencyGerman(taxCalculation.mealAllowances.domestic8h.total)
-      ]);
-    }
-    
-    if (taxCalculation.mealAllowances.domestic24h.days > 0) {
-      rows.push([
-        'Verpflegung Inland 24h',
-        `${taxCalculation.mealAllowances.domestic24h.days} Tage × ${formatCurrencyGerman(taxCalculation.mealAllowances.domestic24h.rate)} €`,
-        formatCurrencyGerman(taxCalculation.mealAllowances.domestic24h.total)
-      ]);
-    }
-    
-    for (const foreign of taxCalculation.mealAllowances.foreign) {
-      rows.push([
-        `Verpflegung ${foreign.country}`,
-        `${foreign.days} Tage`,
-        formatCurrencyGerman(foreign.total)
-      ]);
+    for (const country of taxCalculation.mealAllowances.byCountry) {
+      if (country.days8h > 0) {
+        rows.push([
+          `Verpflegung ${country.country} > 8h`,
+          `${country.days8h} Tage × ${formatCurrencyGerman(country.rate8h)} €`,
+          formatCurrencyGerman(country.total8h)
+        ]);
+      }
+      if (country.days24h > 0) {
+        rows.push([
+          `Verpflegung ${country.country} 24h`,
+          `${country.days24h} Tage × ${formatCurrencyGerman(country.rate24h)} €`,
+          formatCurrencyGerman(country.total24h)
+        ]);
+      }
     }
     
     rows.push([
@@ -477,14 +470,13 @@ export function ExportDropdown() {
     
     // Verpflegung
     lines.push('Verpflegungsmehraufwendungen');
-    if (taxCalculation.mealAllowances.domestic8h.days > 0) {
-      lines.push(`  Inland > 8h: ${taxCalculation.mealAllowances.domestic8h.days} Tage × ${formatCurrencyGerman(taxCalculation.mealAllowances.domestic8h.rate)} € = ${formatCurrencyGerman(taxCalculation.mealAllowances.domestic8h.total)} €`);
-    }
-    if (taxCalculation.mealAllowances.domestic24h.days > 0) {
-      lines.push(`  Inland 24h: ${taxCalculation.mealAllowances.domestic24h.days} Tage × ${formatCurrencyGerman(taxCalculation.mealAllowances.domestic24h.rate)} € = ${formatCurrencyGerman(taxCalculation.mealAllowances.domestic24h.total)} €`);
-    }
-    for (const foreign of taxCalculation.mealAllowances.foreign) {
-      lines.push(`  ${foreign.country}: ${foreign.days} Tage = ${formatCurrencyGerman(foreign.total)} €`);
+    for (const country of taxCalculation.mealAllowances.byCountry) {
+      if (country.days8h > 0) {
+        lines.push(`  ${country.country} > 8h: ${country.days8h} Tage × ${formatCurrencyGerman(country.rate8h)} € = ${formatCurrencyGerman(country.total8h)} €`);
+      }
+      if (country.days24h > 0) {
+        lines.push(`  ${country.country} 24h: ${country.days24h} Tage × ${formatCurrencyGerman(country.rate24h)} € = ${formatCurrencyGerman(country.total24h)} €`);
+      }
     }
     lines.push(`  Summe Verpflegung: ${formatCurrencyGerman(taxCalculation.mealAllowances.totalAllowances)} €`);
     lines.push(`  - Arbeitgeber-Erstattung (steuerfrei): -${formatCurrencyGerman(taxCalculation.mealAllowances.employerReimbursement)} €`);

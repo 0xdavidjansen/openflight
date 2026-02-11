@@ -23,6 +23,7 @@ import {
   calculateDailyAllowances,
   getFahrzeitMinutes,
   detectHomebase,
+  resolveHomebase,
 } from '../utils/calculations';
 
 // Combined context that provides backward-compatible API
@@ -171,6 +172,7 @@ function AppContextInner({ children }: { children: React.ReactNode }) {
   const deferredSettings = useDeferredValue(settings);
   const deferredReimbursementData = useDeferredValue(flightState.reimbursementData);
   const deferredAircraftType = useDeferredValue(flightState.personalInfo?.aircraftType);
+  const deferredRole = useDeferredValue(flightState.personalInfo?.role);
 
   // Detect homebase from flight patterns (fresh calculation, not deferred)
   const detectedHomebaseValue = useMemo(
@@ -188,6 +190,13 @@ function AppContextInner({ children }: { children: React.ReactNode }) {
     }
   }, [detectedHomebaseValue, flightState.personalInfo, setPersonalInfo]);
 
+  // Resolve effective homebase using priority order:
+  // 1. Parsed from PDF, 2. Auto-detected, 3. Unknown
+  const effectiveHomebase = useMemo(
+    () => resolveHomebase(flightState.personalInfo, detectedHomebaseValue),
+    [flightState.personalInfo, detectedHomebaseValue]
+  );
+
   const monthlyBreakdown = useMemo(
     () => calculateMonthlyBreakdown(
       deferredFlights, 
@@ -195,9 +204,10 @@ function AppContextInner({ children }: { children: React.ReactNode }) {
       deferredSettings, 
       deferredReimbursementData, 
       deferredAircraftType,
-      detectedHomebaseValue  // Use fresh value instead of deferred
+      effectiveHomebase,  // Use resolved homebase (parsed > detected)
+      deferredRole
     ),
-    [deferredFlights, deferredNonFlightDays, deferredSettings, deferredReimbursementData, deferredAircraftType, detectedHomebaseValue]
+    [deferredFlights, deferredNonFlightDays, deferredSettings, deferredReimbursementData, deferredAircraftType, effectiveHomebase, deferredRole]
   );
 
   const taxCalculation = useMemo(
@@ -208,9 +218,10 @@ function AppContextInner({ children }: { children: React.ReactNode }) {
         deferredSettings,
         deferredReimbursementData,
         deferredAircraftType,
-        detectedHomebaseValue  // Use fresh value instead of deferred
+        effectiveHomebase,  // Use resolved homebase (parsed > detected)
+        deferredRole
       ),
-    [deferredFlights, deferredNonFlightDays, deferredSettings, deferredReimbursementData, deferredAircraftType, detectedHomebaseValue]
+    [deferredFlights, deferredNonFlightDays, deferredSettings, deferredReimbursementData, deferredAircraftType, effectiveHomebase, deferredRole]
   );
 
   // Calculate daily allowances for display in flight table
@@ -221,8 +232,8 @@ function AppContextInner({ children }: { children: React.ReactNode }) {
       return a.departureTime.localeCompare(b.departureTime);
     });
     const fahrzeitMinutes = getFahrzeitMinutes(deferredSettings);
-    return calculateDailyAllowances(sortedFlights, deferredNonFlightDays, 2025, fahrzeitMinutes, deferredAircraftType);
-  }, [deferredFlights, deferredNonFlightDays, deferredSettings, deferredAircraftType]);
+    return calculateDailyAllowances(sortedFlights, deferredNonFlightDays, 2025, fahrzeitMinutes, deferredAircraftType, deferredRole);
+  }, [deferredFlights, deferredNonFlightDays, deferredSettings, deferredAircraftType, deferredRole]);
 
   const totalFlightHours = useMemo(
     () => monthlyBreakdown.reduce((sum, m) => sum + m.flightHours, 0),

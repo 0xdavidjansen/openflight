@@ -10,7 +10,6 @@ const DEFAULT_SETTINGS: Settings = {
   countMedicalAsTrip: true,
   countGroundDutyAsTrip: true,
   countForeignAsWorkDay: true,
-  homebaseOverride: null, // Auto-detect by default
 };
 
 const STORAGE_KEY = 'flugpersonal-settings';

@@ -310,28 +310,21 @@ export async function generateFlightPDF(data: PDFExportData): Promise<void> {
     }
   );
 
-  if (taxCalculation.mealAllowances.domestic8h.days > 0) {
-    taxSections.push({
-      text: `Inland > 8h: ${taxCalculation.mealAllowances.domestic8h.days} Tage × ${formatCurrencyGerman(taxCalculation.mealAllowances.domestic8h.rate)}`,
-      style: 'taxDetail',
-      margin: [15, 0, 0, 0]
-    });
-  }
-
-  if (taxCalculation.mealAllowances.domestic24h.days > 0) {
-    taxSections.push({
-      text: `Inland 24h: ${taxCalculation.mealAllowances.domestic24h.days} Tage × ${formatCurrencyGerman(taxCalculation.mealAllowances.domestic24h.rate)}`,
-      style: 'taxDetail',
-      margin: [15, 0, 0, 0]
-    });
-  }
-
-  for (const foreign of taxCalculation.mealAllowances.foreign) {
-    taxSections.push({
-      text: `${foreign.country}: ${foreign.days} Tage`,
-      style: 'taxDetail',
-      margin: [15, 0, 0, 0]
-    });
+  for (const country of taxCalculation.mealAllowances.byCountry) {
+    if (country.days8h > 0) {
+      taxSections.push({
+        text: `${country.country} > 8h: ${country.days8h} Tage × ${formatCurrencyGerman(country.rate8h)} = ${formatCurrencyGerman(country.total8h)}`,
+        style: 'taxDetail',
+        margin: [15, 0, 0, 0]
+      });
+    }
+    if (country.days24h > 0) {
+      taxSections.push({
+        text: `${country.country} 24h: ${country.days24h} Tage × ${formatCurrencyGerman(country.rate24h)} = ${formatCurrencyGerman(country.total24h)}`,
+        style: 'taxDetail',
+        margin: [15, 0, 0, 0]
+      });
+    }
   }
 
   taxSections.push(

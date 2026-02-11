@@ -1,10 +1,9 @@
 // German tax law meal allowance rates (Verpflegungsmehraufwand)
 // Based on Bundesfinanzministerium guidelines
 
-import type { AllowanceYear, CountryAllowance, DomesticRates } from '../types';
+import type { AllowanceYear, CountryAllowance } from '../types';
 import {
   ALLOWANCES_BY_YEAR,
-  DOMESTIC_RATES_BY_YEAR,
   DEFAULT_ALLOWANCE_YEAR,
   AIRPORT_TO_CITY_ALLOWANCE,
   normalizeCountryName,
@@ -42,18 +41,10 @@ export function getDistanceRates(year: number = DEFAULT_ALLOWANCE_YEAR): Distanc
 export const DISTANCE_RATES = getDistanceRates(DEFAULT_ALLOWANCE_YEAR);
 
 // Default rate for countries not in the list (Luxemburg rates per BMF)
-export const DEFAULT_FOREIGN_RATE = {
+export const DEFAULT_COUNTRY_RATE = {
   rate8h: 42,
   rate24h: 63,
 } as const;
-
-// Get domestic rates for a specific year
-export function getDomesticRates(year: AllowanceYear = DEFAULT_ALLOWANCE_YEAR): DomesticRates {
-  return DOMESTIC_RATES_BY_YEAR[year] || DOMESTIC_RATES_BY_YEAR[DEFAULT_ALLOWANCE_YEAR];
-}
-
-// Legacy exports for backwards compatibility (uses default year)
-export const DOMESTIC_RATES = DOMESTIC_RATES_BY_YEAR[DEFAULT_ALLOWANCE_YEAR];
 
 // Build CountryAllowance array for a specific year
 export function getCountryAllowancesByYear(year: AllowanceYear = DEFAULT_ALLOWANCE_YEAR): CountryAllowance[] {
@@ -289,8 +280,8 @@ export function getCountryAllowance(countryCode: string, year: AllowanceYear = D
   return {
     country: countryCode,
     countryCode: normalizedCode,
-    rate8h: DEFAULT_FOREIGN_RATE.rate8h,
-    rate24h: DEFAULT_FOREIGN_RATE.rate24h,
+    rate8h: DEFAULT_COUNTRY_RATE.rate8h,
+    rate24h: DEFAULT_COUNTRY_RATE.rate24h,
     flightType: getFlightTypeByCountry(normalizedCode),
   };
 }
@@ -335,8 +326,8 @@ export function getCountryAllowanceByName(countryName: string, year: AllowanceYe
   return {
     country: countryName,
     countryCode: 'XX',
-    rate8h: DEFAULT_FOREIGN_RATE.rate8h,
-    rate24h: DEFAULT_FOREIGN_RATE.rate24h,
+    rate8h: DEFAULT_COUNTRY_RATE.rate8h,
+    rate24h: DEFAULT_COUNTRY_RATE.rate24h,
     flightType: 'longhaul', // Unknown destinations default to longhaul
   };
 }
@@ -369,13 +360,6 @@ export function getAllowanceByAirport(iataCode: string, year: AllowanceYear = DE
   // Fall back to country-based lookup using airports.ts
   const countryCode = getCountryFromAirport(code);
   return getCountryAllowance(countryCode, year);
-}
-
-/**
- * Check if a country code represents Germany (domestic)
- */
-export function isDomestic(countryCode: string): boolean {
-  return countryCode.toUpperCase() === 'DE';
 }
 
 /**

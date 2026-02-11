@@ -13,7 +13,8 @@ export interface PersonalInfo {
   pkNumber?: string;
   documentDate?: string;
   sheetNumber?: string;
-  detectedHomebase?: 'MUC' | 'FRA' | 'Unknown'; // Auto-detected from flights
+  parsedHomebase?: 'MUC' | 'FRA' | null; // Parsed from PDF Dienstelle field (authoritative)
+  detectedHomebase?: 'MUC' | 'FRA' | 'Unknown'; // Auto-detected from flights (fallback)
 }
 
 // Raw flight data from Flugstundenübersicht PDF
@@ -54,9 +55,7 @@ export interface ReimbursementData {
   month: number;
   year: number;
   taxFreeReimbursement: number; // Employer's tax-free meal allowance payment
-  domesticDays8h: number;
-  domesticDays24h: number;
-  foreignDays: { country: string; days: number; rate: number }[];
+  countryDays: { country: string; days8h: number; days24h: number; rate8h: number; rate24h: number }[];
 }
 
 // User settings for calculations
@@ -69,7 +68,6 @@ export interface Settings {
   countMedicalAsTrip: boolean; // ME days = round trip
   countGroundDutyAsTrip: boolean; // EM, RE, DP, DT, SI, TK, SB = round trip
   countForeignAsWorkDay: boolean; // FL days as work days
-  homebaseOverride?: 'MUC' | 'FRA' | null; // Manual override (null = auto-detect)
 }
 
 // Monthly calculation results
@@ -93,7 +91,6 @@ export interface DailyAllowance {
   date: Date;
   hoursAway: number;
   country: string;
-  isDomestic: boolean;
   rate: number; // EUR
   type: '>8h' | '24h' | 'arrival' | 'departure';
 }
@@ -109,11 +106,12 @@ export interface DailyAllowanceInfo {
   isFirstDay: boolean;
   isLastDay: boolean;
   hasFlights: boolean;
-  isDepartureFromGermanyDay: boolean;
-  isReturnToGermanyDay: boolean;
+  isDepartureFromHomeBase?: boolean; // True if departing from detected homebase (FRA or MUC)
+  isReturnToHomeBase?: boolean; // True if returning to detected homebase (FRA or MUC)
   isFromFLStatus?: boolean;
   briefingMinutes?: number; // Briefing time applied to this day (0 if none)
   isLonghaul?: boolean; // Flag indicating if this is a longhaul flight day
+  hasAllowanceQualified?: boolean; // true if meets 8h+ threshold for allowance, false if informational only
 }
 
 // Abroad period tracking
@@ -131,8 +129,8 @@ export interface AbroadPeriod {
   returnLocation?: string;
   flights: Flight[];
   isIncomplete: boolean;
-  isOvernightDeparture?: boolean;  // Departing FROM Germany overnight
-  isOvernightReturn?: boolean;     // Returning TO Germany overnight
+  isOvernightDeparture?: boolean;  // Departing on overnight flight
+  isOvernightReturn?: boolean;     // Returning on overnight flight
 }
 
 // Hotel night for tip calculation
@@ -149,6 +147,18 @@ export interface TripSegment {
   flights: Flight[];
   hotelNights: HotelNight[];
   countries: string[];
+}
+
+// Country breakdown for meal allowances
+export interface CountryAllowanceBreakdown {
+  country: string;
+  days8h: number;
+  rate8h: number;
+  total8h: number;
+  days24h: number;
+  rate24h: number;
+  total24h: number;
+  totalCountry: number;
 }
 
 // Final tax calculation (Endabrechnung)
@@ -178,9 +188,7 @@ export interface TaxCalculation {
   };
   // Verpflegungsmehraufwendungen
   mealAllowances: {
-    domestic8h: { days: number; rate: number; total: number };
-    domestic24h: { days: number; rate: number; total: number };
-    foreign: { country: string; days: number; rate: number; total: number }[];
+    byCountry: CountryAllowanceBreakdown[];
     totalAllowances: number;
     employerReimbursement: number;
     deductibleDifference: number;
@@ -235,26 +243,13 @@ export type TabType = 'upload' | 'flights' | 'summary' | 'settings' | 'about';
 // Supported years for allowance calculations
 export type AllowanceYear = 2023 | 2024 | 2025;
 
-// Country allowance rates (for foreign travel)
+// Country allowance rates
 export interface CountryAllowance {
   country: string;
   countryCode: string;
   rate8h: number; // Partial day rate (>8h)
   rate24h: number; // Full day rate (24h)
   flightType: 'shorthaul' | 'longhaul'; // Flight operation type for this destination
-}
-
-// Domestic German allowance rates by year
-export interface DomesticRates {
-  RATE_8H: number; // More than 8 hours away from home
-  RATE_24H: number; // Full 24-hour day
-  ARRIVAL_DEPARTURE: number; // Arrival/departure day of multi-day trip
-}
-
-// Year-indexed allowance data structure
-export interface YearlyAllowanceData {
-  domestic: DomesticRates;
-  countries: Record<string, [number, number]>; // [fullDay, partialDay]
 }
 
 // Re-export constants for backward compatibility

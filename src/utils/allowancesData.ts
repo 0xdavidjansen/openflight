@@ -8,26 +8,8 @@
 // fullDay: bei einer Abwesenheitsdauer von mindestens 24 Stunden je Kalendertag
 // partialDay: fuer den An- und Abreisetag sowie bei einer Abwesenheitsdauer von mehr als 8 Stunden je Kalendertag
 
-import type { AllowanceYear, DomesticRates } from '../types';
-
-// Domestic German rates by year
-export const DOMESTIC_RATES_BY_YEAR: Record<AllowanceYear, DomesticRates> = {
-  2023: {
-    RATE_8H: 14,
-    RATE_24H: 28,
-    ARRIVAL_DEPARTURE: 14,
-  },
-  2024: {
-    RATE_8H: 14,
-    RATE_24H: 28,
-    ARRIVAL_DEPARTURE: 14,
-  },
-  2025: {
-    RATE_8H: 14,
-    RATE_24H: 28,
-    ARRIVAL_DEPARTURE: 14,
-  },
-};
+import type { AllowanceYear } from '../types';
+import { getCountryFromAirport } from './airports';
 
 // Default year for calculations
 export const DEFAULT_ALLOWANCE_YEAR: AllowanceYear = 2025;
@@ -868,6 +850,252 @@ const SHORTHAUL_COUNTRIES = new Set([
 ]);
 
 /**
+ * Airport longhaul classification lookup.
+ * Maps IATA codes to boolean indicating if destination is longhaul operation.
+ * 
+ * Classification based on geographic location:
+ * - false (Shorthaul): Europe, North Africa, Near East, Western Russia  
+ * - true (Longhaul): Americas, Asia-Pacific, Sub-Saharan Africa, Middle East
+ * 
+ * Auto-generated from SHORTHAUL_COUNTRIES set classification.
+ */
+export const AIRPORT_LONGHAUL_FLAG: Record<string, boolean> = {
+  // Germany - Shorthaul (DE)
+  FRA: false, MUC: false, DUS: false, TXL: false, BER: false, HAM: false, 
+  CGN: false, STR: false, HAJ: false, NUE: false, LEJ: false, DRS: false,
+  DTM: false, FMO: false, PAD: false, SCN: false, FDH: false, FKB: false,
+  HHN: false, NRN: false, ERF: false, RLG: false, GWT: false, BRE: false, IGS: false,
+  
+  // Austria - Shorthaul (AT)
+  VIE: false, SZG: false, INN: false, GRZ: false, LNZ: false, KLU: false,
+  
+  // Switzerland - Shorthaul (CH)
+  ZRH: false, GVA: false, BSL: false,
+  
+  // United Kingdom - Shorthaul (GB)
+  LHR: false, LGW: false, STN: false, LTN: false, LCY: false, MAN: false,
+  BHX: false, EDI: false, GLA: false, BRS: false, NCL: false, LPL: false,
+  EMA: false, ABZ: false, BFS: false,
+  
+  // France - Shorthaul (FR)
+  CDG: false, ORY: false, NCE: false, LYS: false, MRS: false, TLS: false,
+  BOD: false, NTE: false, SXB: false, LIL: false, MPL: false, BIQ: false,
+  
+  // Italy - Shorthaul (IT)
+  FCO: false, MXP: false, LIN: false, VCE: false, NAP: false, BGY: false,
+  BLQ: false, FLR: false, PSA: false, TRN: false, CTA: false, PMO: false,
+  CAG: false, OLB: false, VRN: false, GOA: false, BRI: false,
+  
+  // Spain - Shorthaul (ES)
+  MAD: false, BCN: false, PMI: false, AGP: false, ALC: false, VLC: false,
+  SVQ: false, BIO: false, TFN: false, TFS: false, LPA: false, ACE: false,
+  FUE: false, IBZ: false, MAH: false, SCQ: false,
+  
+  // Portugal - Shorthaul (PT)
+  LIS: false, OPO: false, FAO: false, FNC: false, PDL: false,
+  
+  // Netherlands - Shorthaul (NL)
+  AMS: false, RTM: false, EIN: false, MST: false,
+  
+  // Belgium - Shorthaul (BE)
+  BRU: false, CRL: false, ANR: false, LGG: false,
+  
+  // Luxembourg - Shorthaul (LU)
+  LUX: false,
+  
+  // Ireland - Shorthaul (IE)
+  DUB: false, SNN: false, ORK: false,
+  
+  // Denmark - Shorthaul (DK)
+  CPH: false, BLL: false, AAL: false,
+  
+  // Sweden - Shorthaul (SE)
+  ARN: false, GOT: false, MMX: false, BMA: false,
+  
+  // Norway - Shorthaul (NO)
+  OSL: false, BGO: false, TRD: false, SVG: false, TOS: false,
+  
+  // Finland - Shorthaul (FI)
+  HEL: false, OUL: false, TMP: false, TKU: false, RVN: false,
+  
+  // Iceland - Shorthaul (IS)
+  KEF: false, RKV: false,
+  
+  // Poland - Shorthaul (PL)
+  WAW: false, KRK: false, GDN: false, WRO: false, POZ: false, KTW: false,
+  
+  // Czech Republic - Shorthaul (CZ)
+  PRG: false, BRQ: false,
+  
+  // Slovakia - Shorthaul (SK)
+  BTS: false,
+  
+  // Hungary - Shorthaul (HU)
+  BUD: false,
+  
+  // Estonia - Shorthaul (EE)
+  TLL: false,
+  
+  // Latvia - Shorthaul (LV)
+  RIX: false,
+  
+  // Lithuania - Shorthaul (LT)
+  VNO: false,
+  
+  // Moldova - Shorthaul (MD)
+  KIV: false,
+  
+  // Romania - Shorthaul (RO)
+  OTP: false, CLJ: false,
+  
+  // Bulgaria - Shorthaul (BG)
+  SOF: false, VAR: false, BOJ: false,
+  
+  // Greece - Shorthaul (GR)
+  ATH: false, SKG: false, HER: false, RHO: false, CFU: false, JMK: false,
+  JTR: false, KGS: false, CHQ: false,
+  
+  // Turkey - Shorthaul (TR)
+  IST: false, SAW: false, ESB: false, AYT: false, ADB: false, DLM: false, BJV: false,
+  
+  // Croatia - Shorthaul (HR)
+  ZAG: false, SPU: false, DBV: false, PUY: false,
+  
+  // Slovenia - Shorthaul (SI)
+  LJU: false,
+  
+  // Serbia - Shorthaul (RS)
+  BEG: false,
+  
+  // Montenegro - Shorthaul (ME)
+  TGD: false, TIV: false,
+  
+  // Bosnia and Herzegovina - Shorthaul (BA)
+  SJJ: false,
+  
+  // Albania - Shorthaul (AL)
+  TIA: false,
+  
+  // North Macedonia - Shorthaul (MK)
+  SKP: false,
+  
+  // Cyprus - Shorthaul (CY)
+  LCA: false, PFO: false,
+  
+  // Malta - Shorthaul (MT)
+  MLA: false,
+  
+  // Russia - Shorthaul (RU)
+  SVO: false, DME: false, VKO: false, LED: false,
+  
+  // Ukraine - Shorthaul (UA)
+  KBP: false, IEV: false, ODS: false, LWO: false,
+  
+  // Egypt - Shorthaul (EG)
+  CAI: false, HRG: false, SSH: false,
+  
+  // Morocco - Shorthaul (MA)
+  CMN: false, RAK: false, AGA: false,
+  
+  // Tunisia - Shorthaul (TN)
+  TUN: false, DJE: false,
+  
+  // Algeria - Shorthaul (DZ)
+  ALG: false,
+  
+  // Israel - Shorthaul (IL)
+  TLV: false,
+  
+  // Middle East - Longhaul
+  DXB: true, AUH: true, SHJ: true, // UAE (AE)
+  DOH: true, // Qatar (QA)
+  BAH: true, // Bahrain (BH)
+  KWI: true, // Kuwait (KW)
+  MCT: true, // Oman (OM)
+  JED: true, RUH: true, DMM: true, // Saudi Arabia (SA)
+  AMM: true, // Jordan (JO)
+  BEY: true, // Lebanon (LB)
+  BGW: true, EBL: true, // Iraq (IQ)
+  IKA: true, // Iran (IR)
+  
+  // Sub-Saharan Africa - Longhaul
+  NBO: true, MBA: true, // Kenya (KE)
+  ADD: true, // Ethiopia (ET)
+  JNB: true, CPT: true, DUR: true, // South Africa (ZA)
+  LOS: true, ABV: true, // Nigeria (NG)
+  ABJ: true, // Côte d'Ivoire (CI)
+  ACC: true, // Ghana (GH)
+  DAR: true, // Tanzania (TZ)
+  MRU: true, // Mauritius (MU)
+  SEZ: true, // Seychelles (SC)
+  WDH: true, // Namibia (NA)
+  LAD: true, // Angola (AO)
+  SSG: true, // Equatorial Guinea (GQ)
+  
+  // Asia - Longhaul
+  PEK: true, PVG: true, SHA: true, CAN: true, // China (CN)
+  HKG: true, // Hong Kong (HK)
+  TPE: true, // Taiwan (TW)
+  NRT: true, HND: true, KIX: true, // Japan (JP)
+  ICN: true, GMP: true, // South Korea (KR)
+  SIN: true, // Singapore (SG)
+  BKK: true, DMK: true, HKT: true, // Thailand (TH)
+  KUL: true, // Malaysia (MY)
+  CGK: true, DPS: true, // Indonesia (ID)
+  MNL: true, CEB: true, // Philippines (PH)
+  HAN: true, SGN: true, // Vietnam (VN)
+  DEL: true, BOM: true, BLR: true, MAA: true, CCU: true, HYD: true, // India (IN)
+  CMB: true, // Sri Lanka (LK)
+  MLE: true, // Maldives (MV)
+  KTM: true, // Nepal (NP)
+  DAC: true, // Bangladesh (BD)
+  KHI: true, ISB: true, LHE: true, // Pakistan (PK)
+  TAS: true, // Uzbekistan (UZ)
+  ALA: true, NQZ: true, // Kazakhstan (KZ)
+  TBS: true, // Georgia (GE)
+  EVN: true, // Armenia (AM)
+  GYD: true, // Azerbaijan (AZ)
+  
+  // Americas - Longhaul
+  JFK: true, EWR: true, LGA: true, LAX: true, SFO: true, ORD: true,
+  MIA: true, DFW: true, ATL: true, DEN: true, SEA: true, BOS: true,
+  IAD: true, DCA: true, PHL: true, IAH: true, PHX: true, SAN: true,
+  LAS: true, MCO: true, DTW: true, MSP: true, CLT: true, STL: true, AUS: true, // USA (US)
+  YYZ: true, YVR: true, YUL: true, YYC: true, YOW: true, // Canada (CA)
+  MEX: true, CUN: true, GDL: true, // Mexico (MX)
+  HAV: true, VRA: true, // Cuba (CU)
+  PUJ: true, SDQ: true, // Dominican Republic (DO)
+  SJU: true, // Puerto Rico (PR)
+  PTY: true, // Panama (PA)
+  SJO: true, // Costa Rica (CR)
+  BOG: true, MDE: true, CTG: true, // Colombia (CO)
+  LIM: true, CUZ: true, // Peru (PE)
+  SCL: true, // Chile (CL)
+  GRU: true, GIG: true, BSB: true, // Brazil (BR)
+  EZE: true, AEP: true, // Argentina (AR)
+  MVD: true, // Uruguay (UY)
+  CCS: true, // Venezuela (VE)
+  UIO: true, GYE: true, // Ecuador (EC)
+  LPB: true, // Bolivia (BO)
+  ASU: true, // Paraguay (PY)
+  
+  // Caribbean - Longhaul
+  MBJ: true, KIN: true, // Jamaica (JM)
+  NAS: true, // Bahamas (BS)
+  BGI: true, // Barbados (BB)
+  AUA: true, // Aruba (AW)
+  CUR: true, // Curaçao (CW)
+  SXM: true, // St. Maarten (SX)
+  POS: true, // Trinidad and Tobago (TT)
+  
+  // Oceania - Longhaul
+  SYD: true, MEL: true, BNE: true, PER: true, DRW: true, ADL: true, OOL: true, CNS: true, // Australia (AU)
+  AKL: true, WLG: true, CHC: true, // New Zealand (NZ)
+  NAN: true, // Fiji (FJ)
+  PPT: true, // French Polynesia/Tahiti (PF)
+};
+
+/**
  * Determine if a destination is typically a shorthaul or longhaul operation
  * based on geographic location.
  * @param countryCode ISO country code (e.g., 'US', 'FR', 'CN')
@@ -876,6 +1104,33 @@ const SHORTHAUL_COUNTRIES = new Set([
 export function getFlightTypeByCountry(countryCode: string): 'shorthaul' | 'longhaul' {
   const code = countryCode?.toUpperCase() || '';
   return SHORTHAUL_COUNTRIES.has(code) ? 'shorthaul' : 'longhaul';
+}
+
+/**
+ * Determine if an airport destination is longhaul based on IATA code.
+ * Uses explicit airport classification from AIRPORT_LONGHAUL_FLAG.
+ * Falls back to country-based classification for unknown airports.
+ * 
+ * @param iataCode Airport IATA code (e.g., 'BOM', 'LHR', 'JFK')
+ * @returns true if longhaul destination, true if unknown (conservative default)
+ */
+export function isLonghaulDestination(iataCode: string): boolean {
+  const code = iataCode?.toUpperCase()?.trim() || '';
+  if (!code) return true; // Conservative default for empty/invalid codes
+  
+  // Check explicit mapping first
+  if (code in AIRPORT_LONGHAUL_FLAG) {
+    return AIRPORT_LONGHAUL_FLAG[code];
+  }
+  
+  // Fallback: use country-based classification
+  const countryCode = getCountryFromAirport(code);
+  if (countryCode !== 'XX') {
+    return getFlightTypeByCountry(countryCode) === 'longhaul';
+  }
+  
+  // Unknown airport - default to longhaul (conservative)
+  return true;
 }
 
 // Normalize country name for allowance lookup
@@ -926,9 +1181,4 @@ export function isYearSupported(year: number): year is AllowanceYear {
 // Get default rates for when year is not specified or invalid
 export function getDefaultAllowances(): Record<string, [number, number]> {
   return ALLOWANCES_BY_YEAR[DEFAULT_ALLOWANCE_YEAR];
-}
-
-// Get default domestic rates
-export function getDefaultDomesticRates(): DomesticRates {
-  return DOMESTIC_RATES_BY_YEAR[DEFAULT_ALLOWANCE_YEAR];
 }

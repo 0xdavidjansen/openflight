@@ -10,30 +10,29 @@ import type {
   TripSegment,
   ReimbursementData,
   AllowanceYear,
+  CountryAllowanceBreakdown,
+  PersonalInfo,
 } from '../types';
 import { MONTH_NAMES, GROUND_DUTY_CODES } from '../types';
 import {
   LONGHAUL_AIRCRAFT_TYPES,
-  BRIEFING_TIME_LONGHAUL_MINUTES,
-  BRIEFING_TIME_SHORTHAUL_MINUTES,
   BRIEFING_TIME_SIMULATOR_MINUTES,
 } from '../constants';
 import { 
   DISTANCE_RATES, 
   getDistanceRates,
   getCountryAllowanceByName,
-  getDomesticRates,
-  isDomestic,
   DEFAULT_ALLOWANCE_YEAR,
   getFlightTypeByCountry,
 } from './allowances';
 import { getCountryFromAirport, getCountryName } from './airports';
-import { AIRPORT_TO_CITY_ALLOWANCE } from './allowancesData';
+import { AIRPORT_TO_CITY_ALLOWANCE, isLonghaulDestination } from './allowancesData';
  
 /**
  * Detect homebase (MUC or FRA) from flight patterns
  * Counts departures and arrivals for both airports and returns the one with higher count
  * Returns 'Unknown' if tie or neither airport is used
+ * @deprecated This is now a fallback. Use resolveHomebase() which prioritizes parsed homebase from PDF.
  */
 export function detectHomebase(flights: Flight[]): 'MUC' | 'FRA' | 'Unknown' {
   if (flights.length === 0) return 'Unknown';
@@ -50,6 +49,34 @@ export function detectHomebase(flights: Flight[]): 'MUC' | 'FRA' | 'Unknown' {
 
   if (mucCount === fraCount) return 'Unknown';
   return mucCount > fraCount ? 'MUC' : 'FRA';
+}
+
+/**
+ * Resolve effective homebase with priority order:
+ * 1. Parsed from PDF Dienstelle field (authoritative)
+ * 2. Auto-detected from flight patterns (fallback)
+ * 3. 'Unknown' if none available
+ * 
+ * @param personalInfo Personal info which may contain parsedHomebase
+ * @param detectedHomebase Auto-detected homebase from flights
+ * @returns Resolved homebase following priority order
+ */
+export function resolveHomebase(
+  personalInfo: PersonalInfo | null,
+  detectedHomebase: 'MUC' | 'FRA' | 'Unknown'
+): 'MUC' | 'FRA' | 'Unknown' {
+  // Priority 1: Parsed from PDF (authoritative source)
+  if (personalInfo?.parsedHomebase) {
+    return personalInfo.parsedHomebase;
+  }
+
+  // Priority 2: Auto-detected from flight patterns (fallback)
+  if (detectedHomebase !== 'Unknown') {
+    return detectedHomebase;
+  }
+
+  // Priority 3: Unknown
+  return 'Unknown';
 }
 
 /**
@@ -114,29 +141,44 @@ export function formatDateStr(date: Date): string {
 
 /**
  * Calculate absence duration for departure or return day
- * @param flight The flight
+ * For same-day multi-flight operations, calculates from first departure to last arrival
+ * @param flightOrFlights Single flight or array of flights on the same day
  * @param isDepDay True if departure day, false if return day
  * @param fahrzeitMinutes Travel time to airport in minutes (one way)
  * @param briefingMinutes Briefing time before departure in minutes (only applied on departure day for outbound flights)
  * @param postBriefingMinutes Briefing time after arrival in minutes (for simulator flights)
  */
 export function calculateAbsenceDuration(
-  flight: Flight,
+  flightOrFlights: Flight | Flight[],
   isDepDay: boolean,
   fahrzeitMinutes: number,
   briefingMinutes: number = 0,
   postBriefingMinutes: number = 0
 ): number {
+  // Handle array of flights for same-day multi-flight operations
+  const flights = Array.isArray(flightOrFlights) ? flightOrFlights : [flightOrFlights];
+  const flight = flights[0]; // First flight for compatibility with existing logic
+  
   const fahrzeit = fahrzeitMinutes / 60;
   const briefing = briefingMinutes / 60;
   const postBriefing = postBriefingMinutes / 60;
 
   if (isDepDay) {
+    // For same-day operations with multiple flights, calculate span from first departure to last arrival
+    if (flights.length > 1 && !checkOvernightFlight(flights[flights.length - 1])) {
+      // Find earliest departure and latest arrival on the same day
+      const depHour = parseTimeToHours(flights[0].departureTime);
+      const arrHour = parseTimeToHours(flights[flights.length - 1].arrivalTime);
+      const totalFlightSpan = arrHour - depHour;
+      
+      // Total absence = commute + briefing + flight span + post-briefing + commute home
+      return fahrzeit + briefing + totalFlightSpan + postBriefing + fahrzeit;
+    }
+    
+    // Original single-flight logic
     const depHour = parseTimeToHours(flight.departureTime);
 
     // Absence starts at: departureTime - briefingTime - fahrzeit
-    // So total = (24 - depHour) + briefing + fahrzeit
-
     // For overnight flights departing from Germany:
     // Count from departure through midnight into the next day's arrival
     if (checkOvernightFlight(flight)) {
@@ -146,9 +188,13 @@ export function calculateAbsenceDuration(
       // + briefing = briefing time before departure
       return (24 - depHour) + arrHour + briefing + fahrzeit;
     } else {
-      // Single-day flight: only count departure day hours
-      // For simulator flights: add post-briefing time (spent at airport after flight)
-      return (24 - depHour) + briefing + fahrzeit + postBriefing;
+      // Same-day flight: calculate actual absence duration
+      // Order: Commute (to work) + Briefing (before) + Flight + Post-Briefing (after) + Commute (to home)
+      const arrHour = parseTimeToHours(flight.arrivalTime);
+      const flightDuration = arrHour - depHour;
+      
+      // Total absence = commute to airport + pre-briefing + flight time + post-briefing + commute home
+      return fahrzeit + briefing + flightDuration + postBriefing + fahrzeit;
     }
   } else {
     const arrHour = parseTimeToHours(flight.arrivalTime);
@@ -191,16 +237,63 @@ export function isLonghaul(aircraftType?: string): boolean {
 }
 
 /**
- * Get briefing time in minutes for a given aircraft type.
- * Longhaul flights require 1h50m briefing before departure.
- * Shorthaul briefing time is a placeholder (currently 0).
- * @param aircraftType The Muster string from the PDF
+ * Determine if a flight is longhaul based on crew role.
+ * Flight crew (pilots): Determined by aircraft type
+ * Cabin crew: Determined by destination country
+ * @param role The crew role (e.g., "FO / COCKPIT", "CPT", "FB / CABIN", "PU / CABIN")
+ * @param aircraftType The aircraft type (Muster)
+ * @param destination Optional destination airport code (IATA) - used for cabin crew classification
+ * @returns true if longhaul, false if shorthaul
  */
-export function getBriefingTimeMinutes(aircraftType?: string): number {
-  if (isLonghaul(aircraftType)) {
-    return BRIEFING_TIME_LONGHAUL_MINUTES;
+export function isLonghaulForRole(
+  role: string | undefined,
+  aircraftType: string | undefined,
+  destination?: string
+): boolean {
+  if (!role) {
+    // Fallback to aircraft type if role is unknown
+    return isLonghaul(aircraftType);
   }
-  return BRIEFING_TIME_SHORTHAUL_MINUTES;
+  
+  const normalizedRole = role.toLowerCase().trim();
+  
+  // Check for flight crew (pilots)
+  const isFlightCrew = 
+    normalizedRole.startsWith('fo') ||
+    normalizedRole.startsWith('cpt') ||
+    normalizedRole.includes('cockpit') ||
+    normalizedRole.includes('offizier') ||
+    normalizedRole.includes('kapitän') ||
+    normalizedRole.includes('kapitan') ||
+    normalizedRole.includes('flugkapitän');
+  
+  // Check for cabin crew
+  const isCabinCrew = 
+    normalizedRole.includes('cabin') ||
+    normalizedRole.startsWith('fb') ||
+    normalizedRole.startsWith('pu') ||
+    normalizedRole.includes('flugbegleiter') ||
+    normalizedRole.includes('purser') ||
+    normalizedRole.includes('kabine');
+  
+  if (isFlightCrew) {
+    // Flight crew: use aircraft type to determine if longhaul
+    return isLonghaul(aircraftType);
+  } else if (isCabinCrew) {
+    // Cabin crew: use destination to determine if longhaul
+    if (!destination) {
+      // Fallback to aircraft type if destination is not available
+      return isLonghaul(aircraftType);
+    }
+    
+    // Get the country code from the destination airport
+    const countryCode = getCountryFromAirport(destination);
+    const flightType = getFlightTypeByCountry(countryCode);
+    return flightType === 'longhaul';
+  }
+  
+  // Default fallback
+  return isLonghaul(aircraftType);
 }
 
 /**
@@ -218,25 +311,35 @@ export function getSimulatorBriefingTimeMinutes(): { preBriefing: number; postBr
 }
 
 /**
- * Get briefing time in minutes based on crew role, aircraft type, and destination.
- * Flight crew (cockpit): Determined by aircraft type
- *   - Longhaul aircraft: 110min
- *   - Shorthaul aircraft: 80min
- * Cabin crew: Determined by destination
+ * Get briefing time in minutes based on crew role and destination.
+ * Both flight crew and cabin crew briefing times are determined by destination:
+ * Flight crew (cockpit):
+ *   - Longhaul destinations (intercontinental): 110min
+ *   - Shorthaul destinations (Europe/nearby): 80min
+ * Cabin crew:
  *   - Longhaul destinations (intercontinental): 110min
  *   - Shorthaul destinations (Europe/nearby): 85min
+ * Simulator flights:
+ *   - Pre-briefing: 60min (regardless of role)
  * @param role The crew role (e.g., "FO / COCKPIT", "CPT", "FB / CABIN", "PU / CABIN")
- * @param aircraftType The aircraft type (Muster)
- * @param destination Optional destination airport code (IATA) - used for cabin crew classification
+ * @param aircraftType The aircraft type (Muster) - kept for backwards compatibility but not used
+ * @param destination Optional destination airport code (IATA) - used for determining briefing time
+ * @param flight Optional flight object - used to detect simulator flights
  * @returns Pre-flight briefing time in minutes
  */
 export function getBriefingTimeForRole(
   role: string | undefined,
-  aircraftType: string | undefined,
-  destination?: string
+  _aircraftType: string | undefined,
+  destination?: string,
+  flight?: Flight
 ): number {
   if (!role) {
     return 0;
+  }
+  
+  // Check if this is a simulator flight first
+  if (flight && isSimulatorFlight(flight)) {
+    return getSimulatorBriefingTimeMinutes().preBriefing;  // Returns 60 minutes
   }
   
   const normalizedRole = role.toLowerCase().trim();
@@ -263,17 +366,21 @@ export function getBriefingTimeForRole(
     normalizedRole.includes('kabine');
   
   if (isFlightCrew) {
-    // Flight crew: use aircraft type to determine briefing time
-    if (!aircraftType) return 0;
-    const isLonghaulAircraft = isLonghaul(aircraftType);
-    return isLonghaulAircraft ? 110 : 80;
+    // Flight crew: use destination to determine briefing time
+    // Default to 110 minutes (longhaul) when destination is not available
+    if (!destination) {
+      return 110;
+    }
+    
+    // Get the country code from the destination airport
+    const countryCode = getCountryFromAirport(destination);
+    const flightType = getFlightTypeByCountry(countryCode);
+    return flightType === 'longhaul' ? 110 : 80;
   } else if (isCabinCrew) {
     // Cabin crew: use destination to determine briefing time
+    // Default to 110 minutes (longhaul) when destination is not available
     if (!destination) {
-      // Fallback to aircraft type if destination is not available
-      if (!aircraftType) return 0;
-      const isLonghaulAircraft = isLonghaul(aircraftType);
-      return isLonghaulAircraft ? 110 : 85;
+      return 110;
     }
     
     // Get the country code from the destination airport
@@ -408,7 +515,7 @@ export function countWorkDays(
   for (const day of nonFlightDays) {
     const dateStr = day.date.toISOString().split('T')[0];
     
-    if (day.type === 'ME') {
+    if (day.type === 'ME' && settings.countMedicalAsTrip) {
       nonFlightWorkDates.add(dateStr);
     } else if (day.type === 'FL') {
       nonFlightWorkDates.add(dateStr);
@@ -493,8 +600,8 @@ export function countTrips(
 ): number {
   let trips = 0;
   
-  // Resolve effective homebase: manual override takes precedence over auto-detection
-  const effectiveHomebase = settings.homebaseOverride ?? detectedHomebase;
+  // Use detected homebase
+  const effectiveHomebase = detectedHomebase;
   
   // Create set of days that have A/E flags (for efficient lookup)
   const daysWithAE = new Set<string>();
@@ -569,22 +676,20 @@ export function detectHotelNights(flights: Flight[]): HotelNight[] {
       (endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000)
     );
     
-    if (nights > 0 && trip.countries.some((c) => !isDomestic(c))) {
-      // Track the last known foreign location
-      let lastForeignLocation = '';
-      let lastForeignCountry = '';
+    if (nights > 0) {
+      // Track the last known location
+      let lastLocation = '';
+      let lastCountry = '';
       
-      // Find the initial foreign destination from day 1 flights
+      // Find the initial destination from day 1 flights
       const day1Flights = trip.flights.filter(
         (f) => f.date.toISOString().split('T')[0] === startDate.toISOString().split('T')[0]
       );
       const lastDay1Flight = day1Flights[day1Flights.length - 1];
       if (lastDay1Flight) {
         const arrivalCountry = getCountryFromAirport(lastDay1Flight.arrival);
-        if (!isDomestic(arrivalCountry)) {
-          lastForeignLocation = lastDay1Flight.arrival;
-          lastForeignCountry = arrivalCountry;
-        }
+        lastLocation = lastDay1Flight.arrival;
+        lastCountry = arrivalCountry;
       }
       
       // Add hotel nights for each night of the trip
@@ -600,18 +705,16 @@ export function detectHotelNights(flights: Flight[]): HotelNight[] {
         if (flightsThisDay.length > 0) {
           const lastFlight = flightsThisDay[flightsThisDay.length - 1];
           const arrivalCountry = getCountryFromAirport(lastFlight.arrival);
-          if (!isDomestic(arrivalCountry)) {
-            lastForeignLocation = lastFlight.arrival;
-            lastForeignCountry = arrivalCountry;
-          }
+          lastLocation = lastFlight.arrival;
+          lastCountry = arrivalCountry;
         }
         
-        // Add hotel night if we have a foreign location
-        if (lastForeignLocation && lastForeignCountry) {
+        // Add hotel night if we have a location
+        if (lastLocation && lastCountry) {
           hotelNights.push({
             date: nightDate,
-            location: lastForeignLocation,
-            country: getCountryName(lastForeignCountry),
+            location: lastLocation,
+            country: getCountryName(lastCountry),
           });
         }
       }
@@ -622,7 +725,8 @@ export function detectHotelNights(flights: Flight[]): HotelNight[] {
 }
 
 /**
- * Detect trip segments from flights
+ * Detect trip segments from flights based on A/E duty codes
+ * A = start of tour, E = end of tour
  */
 export function detectTrips(flights: Flight[]): TripSegment[] {
   const trips: TripSegment[] = [];
@@ -637,11 +741,10 @@ export function detectTrips(flights: Flight[]): TripSegment[] {
   let currentTrip: TripSegment | null = null;
   
   for (const flight of sortedFlights) {
-    const departureCountry = getCountryFromAirport(flight.departure);
     const arrivalCountry = getCountryFromAirport(flight.arrival);
     
-    // Starting from Germany = new trip start
-    if (isDomestic(departureCountry) && !currentTrip) {
+    // Tour starts with A duty code
+    if (flight.dutyCode === 'A' && !currentTrip) {
       currentTrip = {
         startDate: flight.date,
         endDate: flight.date,
@@ -658,15 +761,15 @@ export function detectTrips(flights: Flight[]): TripSegment[] {
         currentTrip.countries.push(arrivalCountry);
       }
       
-      // Returning to Germany = trip ends
-      if (isDomestic(arrivalCountry)) {
+      // Tour ends with E duty code
+      if (flight.dutyCode === 'E') {
         trips.push(currentTrip);
         currentTrip = null;
       }
     }
   }
   
-  // Handle unclosed trip
+  // Handle unclosed trip (no E flag at end)
   if (currentTrip) {
     trips.push(currentTrip);
   }
@@ -818,42 +921,20 @@ export function calculateDailyAllowances(
     const departureCountryName = getCountryNameForAllowance(flight.departure, departureCountry);
     const arrivalCountryName = getCountryNameForAllowance(flight.arrival, arrivalCountry);
     
-    // Leaving Germany
-    if (isDomestic(departureCountry) && !isDomestic(arrivalCountry)) {
+    // Tour starts: flight with A duty code
+    if (flight.dutyCode === 'A') {
       const isOvernightDeparture = checkOvernightFlight(flight);
       
-      // CRITICAL FIX: Orphaned continuation flights show departure from Germany
-      // because they record the FULL route (e.g., FRA→CPT), but the actual departure
-      // happened in the previous month. These should NOT start a new "leaving Germany" period.
-      // Instead, treat them as arrivals abroad (the person is already in a period that
-      // started in previous data).
-      if (flight.isContinuation) {
-        console.warn(`[WARNING] Orphaned continuation ${flight.flightNumber} on ${formatDateStr(flightDate)} - treating as arrival abroad only`);
-        
-        // Create an incomplete period that represents landing abroad from a previous month's departure
-        if (!currentPeriod) {
-          // Start the period the day before arrival (we don't know when they really left)
-          const estimatedStart = new Date(flightDate);
-          estimatedStart.setDate(estimatedStart.getDate() - 1);
-          
-          currentPeriod = {
-            startDate: estimatedStart,
-            endDate: arrivalDate,
-            country: arrivalCountryName,
-            flag: '🌍',
-            location: flight.arrival,
-            year: flight.year,
-            departureFlightDate: null, // Unknown - departed in previous month
-            returnFlightDate: null,
-            flights: [flight],
-            isIncomplete: true,
-            isOvernightDeparture: true, // Was overnight from previous month
-          };
-          console.log(`Created incomplete period for orphaned continuation - estimated start: ${formatDateStr(estimatedStart)}`);
-        }
-        // Skip normal "leaving Germany" period creation
+      // Check if we already have a period from the same day
+      // If yes, extend the existing period instead of creating a new one
+      if (currentPeriod && formatDateStr(currentPeriod.startDate) === formatDateStr(flightDate)) {
+        // Extend existing period with this flight
+        currentPeriod.endDate = arrivalDate;
+        currentPeriod.country = arrivalCountryName;
+        currentPeriod.location = flight.arrival;
+        currentPeriod.flights.push(flight);
       } else {
-        // Normal departure from Germany
+        // Normal tour start - create new period
         currentPeriod = {
           startDate: flightDate,
           endDate: arrivalDate,
@@ -869,15 +950,37 @@ export function calculateDailyAllowances(
         };
       }
     }
-    // Continuing abroad (update location and extend period)
-    else if (!isDomestic(departureCountry) && !isDomestic(arrivalCountry) && currentPeriod) {
-      currentPeriod.endDate = arrivalDate;
-      currentPeriod.country = arrivalCountryName;
-      currentPeriod.location = flight.arrival;
-      currentPeriod.flights.push(flight);
+    // Tour ends: flight with E duty code
+    else if (flight.dutyCode === 'E' && currentPeriod) {
+      const isOvernightReturn = checkOvernightFlight(flight);
+      
+      if (isOvernightReturn) {
+        // For overnight returns:
+        // - Period ends on ARRIVAL day (person is on tour until landing)
+        // - Departure day gets full rate if on tour entire day
+        // - Arrival day gets partial rate
+        currentPeriod.endDate = arrivalDate;
+        currentPeriod.returnFlightDate = flightDate;
+        currentPeriod.returnCountry = departureCountryName;
+        currentPeriod.returnFlag = '🌍';
+        currentPeriod.returnLocation = flight.departure;
+        currentPeriod.flights.push(flight);
+        currentPeriod.isOvernightReturn = true;
+      } else {
+        // Same-day return: arrival day gets the rate
+        currentPeriod.endDate = arrivalDate;
+        currentPeriod.returnFlightDate = flightDate;
+        currentPeriod.returnCountry = departureCountryName;
+        currentPeriod.returnFlag = '🌍';
+        currentPeriod.returnLocation = flight.departure;
+        currentPeriod.flights.push(flight);
+      }
+      
+      abroadPeriods.push(currentPeriod);
+      currentPeriod = null;
     }
-    // Returning to Germany - but NO current period (trip started in previous data set)
-    else if (!isDomestic(departureCountry) && isDomestic(arrivalCountry) && !currentPeriod) {
+    // Orphaned E flag: tour ends but no active period (started in previous month)
+    else if (flight.dutyCode === 'E' && !currentPeriod) {
       // Create an incomplete period - we don't know when it started
       const returnFlightDate = flightDate;
       const returnArrivalDate = arrivalDate;
@@ -894,7 +997,7 @@ export function calculateDailyAllowances(
       if (relatedAbroadDays.length > 0) {
         startDate = new Date(relatedAbroadDays[0].date);
       } else {
-        // No FL days found - assume at least the day before return was abroad
+        // No FL days found - assume at least the day before return was on tour
         startDate = new Date(returnFlightDate);
         startDate.setDate(startDate.getDate() - 1);
       }
@@ -906,7 +1009,7 @@ export function calculateDailyAllowances(
         flag: '🌍',
         location: flight.departure,
         year: flight.year,
-        departureFlightDate: null, // Unknown - trip started in previous period
+        departureFlightDate: null, // Unknown - tour started in previous period
         returnFlightDate: returnFlightDate,
         returnCountry: departureCountryName,
         returnFlag: '🌍',
@@ -917,38 +1020,14 @@ export function calculateDailyAllowances(
       
       abroadPeriods.push(currentPeriod);
       currentPeriod = null;
-      console.log('Created incomplete abroad period for return flight without departure:', flight);
+      console.log('Created incomplete period for E flag without active tour:', flight);
     }
-    // Returning to Germany - with current period
-    else if (!isDomestic(departureCountry) && isDomestic(arrivalCountry)) {
-      if (currentPeriod) {
-        const isOvernightReturn = checkOvernightFlight(flight);
-        
-        if (isOvernightReturn) {
-          // For overnight returns:
-          // - Period ends on ARRIVAL day in Germany (person is abroad until landing)
-          // - Departure day from abroad gets full rate if abroad entire day
-          // - Arrival day in Germany gets partial rate
-          currentPeriod.endDate = arrivalDate; // End on arrival day (person abroad until landing)
-          currentPeriod.returnFlightDate = flightDate;
-          currentPeriod.returnCountry = departureCountryName;
-          currentPeriod.returnFlag = '🌍';
-          currentPeriod.returnLocation = flight.departure;
-          currentPeriod.flights.push(flight);
-          currentPeriod.isOvernightReturn = true;
-        } else {
-          // Same-day return: arrival day gets the rate
-          currentPeriod.endDate = arrivalDate;
-          currentPeriod.returnFlightDate = flightDate;
-          currentPeriod.returnCountry = departureCountryName;
-          currentPeriod.returnFlag = '🌍';
-          currentPeriod.returnLocation = flight.departure;
-          currentPeriod.flights.push(flight);
-        }
-        
-        abroadPeriods.push(currentPeriod);
-        currentPeriod = null;
-      }
+    // Continuing tour: any flight while in active period (not A or E)
+    else if (currentPeriod) {
+      currentPeriod.endDate = arrivalDate;
+      currentPeriod.country = arrivalCountryName;
+      currentPeriod.location = flight.arrival;
+      currentPeriod.flights.push(flight);
     }
   }
   
@@ -987,11 +1066,10 @@ export function calculateDailyAllowances(
         isFirstDay: false,
         isLastDay: false,
         hasFlights: false,
-        isDepartureFromGermanyDay: false,
-        isReturnToGermanyDay: false,
         isFromFLStatus: true,
         briefingMinutes: 0,
-        isLonghaul: false
+        isLonghaul: false,
+        hasAllowanceQualified: true // FL days always qualify for allowances
       });
       console.log('Added allowance for FL abroad day not covered by periods:', dateStr, abroadDay);
     }
@@ -1054,10 +1132,8 @@ export function calculateDailyAllowances(
       
       // After this flight arrives, you're in the destination country
       const arrivalCountry = getCountryFromAirport(flight.arrival);
-      if (!isDomestic(arrivalCountry)) {
-        lastCountry = getCountryNameForAllowance(flight.arrival, arrivalCountry);
-        lastLocation = flight.arrival;
-      }
+      lastCountry = getCountryNameForAllowance(flight.arrival, arrivalCountry);
+      lastLocation = flight.arrival;
       dayCountryMap.set(arrivalDateStr, { country: lastCountry, flag: lastFlag, location: lastLocation });
     }
     
@@ -1097,8 +1173,8 @@ export function calculateDailyAllowances(
       const isDepartingFromAbroadDay = period.isOvernightReturn && period.returnFlightDate &&
         currentDate.getTime() === period.returnFlightDate.getTime();
       
-      // Check if this is the day we ARRIVE back in Germany
-      const returnFlight = period.flights.find(f => isDomestic(getCountryFromAirport(f.arrival)));
+      // Check if this is the day we end the tour (E flag)
+      const returnFlight = period.flights.find(f => f.dutyCode === 'E');
       
       // For overnight returns: Check if this is the ARRIVAL day in Germany (day after departure)
       const isArrivalDayAfterOvernightReturn = period.isOvernightReturn && returnFlight &&
@@ -1116,14 +1192,16 @@ export function calculateDailyAllowances(
       
       // Determine country for this day
       // Special case: On return day to Germany, use the departure country (where you were before returning)
-      // This is the country you get the allowance for on Abreisetag
+      // This applies to both same-day returns and arrival day after overnight returns (Ankunftstag)
+      // This is the country you get the allowance for on Abreisetag/Ankunftstag
       let country: string, flag: string, location: string;
-      if (isReturnToGermanyDay && period.returnCountry) {
+      if ((isReturnToGermanyDay || isArrivalDayAfterOvernightReturn) && period.returnCountry) {
         country = period.returnCountry;
         flag = period.returnFlag || '🌍';
         location = period.returnLocation || '';
         console.log(`[DEBUG] Day ${dateStr} - Return to Germany:`, {
           isReturnToGermanyDay,
+          isArrivalDayAfterOvernightReturn,
           returnCountry: period.returnCountry,
           assignedCountry: country,
           isIncomplete: period.isIncomplete
@@ -1143,19 +1221,50 @@ export function calculateDailyAllowances(
       // Get rates for this country and year
       const rates = getDailyAllowanceRates(country, yearForDay as AllowanceYear);
       
-      // Calculate briefing time for this period (based on first flight's duty code and destination)
+      // Calculate briefing time for this period
+      // Find the FIRST flight with duty code 'A' in the period (not just period.flights[0])
+      // This handles cases where positioning flights come before the A-flagged flight
       const firstFlight = period.flights[0];
-      const briefingMinutes = firstFlight.dutyCode === 'A' 
-        ? getBriefingTimeForRole(role, aircraftType, firstFlight.arrival)
+      const firstAFlight = period.flights.find(f => f.dutyCode === 'A');
+      const briefingMinutes = firstAFlight
+        ? getBriefingTimeForRole(role, aircraftType, firstAFlight.arrival, firstAFlight)
+        : 0;
+      
+      // Calculate post-briefing time (only for simulator flights)
+      const postBriefingMinutes = firstFlight && isSimulatorFlight(firstFlight)
+        ? getSimulatorBriefingTimeMinutes().postBriefing  // Returns 60 minutes
         : 0;
       
       // Determine rate type according to German tax law
       let rate: number, rateType: '24h' | 'An/Ab' | 'none';
       
       if (isDepartureFromGermanyDay) {
-        const absenceHours = calculateAbsenceDuration(firstFlight, true, fahrzeitMinutes, briefingMinutes);
-        console.log(`Departure day absence: ${absenceHours} hours (briefing: ${briefingMinutes}min, dutyCode: ${firstFlight.dutyCode})`);
-        if (absenceHours >= 8) {
+        // Get all flights on the departure day for accurate absence calculation
+        const departureDayFlights = period.flights.filter(f => 
+          formatDateStr(f.date) === formatDateStr(period.departureFlightDate!)
+        );
+        
+        // Pass all same-day flights to calculate total absence span
+        const absenceHours = calculateAbsenceDuration(
+          departureDayFlights.length > 0 ? departureDayFlights : firstFlight,
+          true,
+          fahrzeitMinutes,
+          briefingMinutes,
+          postBriefingMinutes
+        );
+        console.log(`Departure day absence: ${absenceHours.toFixed(2)} hours (${departureDayFlights.length} flights, briefing: ${briefingMinutes}min, dutyCode: ${firstFlight.dutyCode})`);
+        
+        // Check if this is a multi-day trip (staying abroad overnight)
+        const isMultiDayTrip = period.startDate.getTime() !== endDate.getTime();
+        
+        if (isMultiDayTrip) {
+          // Multi-day trip: Always grant partial rate because the person is >8h away from home
+          // (they're staying abroad overnight, so they're away for more than 8 hours total)
+          rate = rates[1];
+          rateType = 'An/Ab';
+          console.log(`Departure day for multi-day trip: granting partial rate (away >8h from home)`);
+        } else if (absenceHours >= 8) {
+          // Same-day trip: Only grant allowance if absence >= 8h on that single day
           rate = rates[1];
           rateType = 'An/Ab';
         } else {
@@ -1206,10 +1315,9 @@ export function calculateDailyAllowances(
         isFirstDay,
         isLastDay,
         hasFlights: hasAnyFlightActivity,
-        isDepartureFromGermanyDay: isDepartureFromGermanyDay || false,
-        isReturnToGermanyDay: isReturnToGermanyDay || false,
         briefingMinutes,
-        isLonghaul: isLonghaul(aircraftType)
+        isLonghaul: isLonghaulDestination(firstFlight.arrival),
+        hasAllowanceQualified: true // Abroad periods always qualify for allowances
       });
       
       console.log(`[DEBUG] Allowance set for ${dateStr}:`, {
@@ -1222,11 +1330,11 @@ export function calculateDailyAllowances(
       currentDate.setDate(currentDate.getDate() + 1);
     }
     
-    // Special handling for overnight returns: Add arrival day in Germany with partial FOREIGN rate
+    // Special handling for overnight returns: Add arrival day with partial rate
     // The arrival day gets the partial rate from the country you departed from
     if (period.isOvernightReturn && period.returnFlightDate && period.returnCountry) {
       const returnFlight = period.flights.find(f => 
-        isDomestic(getCountryFromAirport(f.arrival)) && 
+        f.dutyCode === 'E' && 
         new Date(f.date).getTime() === period.returnFlightDate!.getTime()
       );
       
@@ -1248,10 +1356,9 @@ export function calculateDailyAllowances(
             isFirstDay: false,
             isLastDay: false,
             hasFlights: true,
-            isDepartureFromGermanyDay: false,
-            isReturnToGermanyDay: true,
             briefingMinutes: 0,
-            isLonghaul: false
+            isLonghaul: false,
+            hasAllowanceQualified: true // Overnight return arrival days always qualify
           });
           
           console.log(`Added arrival day allowance for overnight return: ${arrivalDateStr} - ${rates[1]}€ (${period.returnCountry})`);
@@ -1260,7 +1367,7 @@ export function calculateDailyAllowances(
     }
   }
   
-  // Fourth pass: Add domestic ground duty days that qualify for allowances
+  // Fourth pass: Add ground duty days that qualify for allowances
   // Only ME (Medical), SB (Standby), and EM (Emergency Training) get partial rate (8h)
   // RE, RB, DP, DT, SI, TK do NOT get meal allowances
   for (const day of nonFlightDays) {
@@ -1274,132 +1381,78 @@ export function calculateDailyAllowances(
     if (day.type !== 'ME' && day.type !== 'SB' && day.type !== 'EM') continue;
     
     const yearForDay = day.year;
-    const domesticRates = getDomesticRates(yearForDay as AllowanceYear);
+    const rates = getDailyAllowanceRates('Deutschland', yearForDay as AllowanceYear);
     
-    // ME, SB, and EM get partial (8h) domestic rate
+    // ME, SB, and EM get partial (8h) rate for Deutschland
     dailyAllowances.set(dateStr, {
       country: 'Deutschland',
       flag: '🇩🇪',
       location: 'DE',
-      rate: domesticRates.RATE_8H,
+      rate: rates[1], // Partial rate
       rateType: 'An/Ab', // Partial rate
       year: yearForDay,
       isFirstDay: false,
       isLastDay: false,
       hasFlights: false,
-      isDepartureFromGermanyDay: false,
-      isReturnToGermanyDay: false,
       briefingMinutes: 0,
-      isLonghaul: false
+      isLonghaul: false,
+      hasAllowanceQualified: true // Ground duty days always qualify for allowances
     });
     
-    console.log(`Added partial rate allowance for ${day.type} day:`, dateStr, domesticRates.RATE_8H);
+    console.log(`Added partial rate allowance for ${day.type} day:`, dateStr, rates[1]);
   }
-  
-  // Fifth pass: Process domestic-only flight days
-  // For days with only domestic flights, check if total absence exceeds 8h
-  // If so, assign domestic partial rate (14€)
-  
-  // Group flights by date
-  const flightsByDate = new Map<string, Flight[]>();
+
+  // Fifth pass: Simulator flight allowances (domestic training days)
+  // Simulator flights (FRA→FRA or MUC→MUC) with ≥8h absence get Deutschland partial rate
   for (const flight of sortedFlights) {
     const dateStr = formatDateStr(flight.date);
-    if (!flightsByDate.has(dateStr)) {
-      flightsByDate.set(dateStr, []);
-    }
-    flightsByDate.get(dateStr)!.push(flight);
-  }
-  
-  for (const [dateStr, dayFlights] of flightsByDate) {
-    // Skip if already has an allowance (e.g., from abroad period or non-flight day)
-    if (dailyAllowances.has(dateStr)) continue;
-
-    // Check that ALL flights on this day are domestic (both departure and arrival are DE)
-    const allDomestic = dayFlights.every(f =>
-      isDomestic(getCountryFromAirport(f.departure)) &&
-      isDomestic(getCountryFromAirport(f.arrival))
-    );
-
-    if (!allDomestic) continue; // Skip if any flight is foreign (already handled by abroad periods)
-
-    // Check if any flight on this day is a simulator flight
-    const hasSimulatorFlight = dayFlights.some(f => isSimulatorFlight(f));
-
-    // Calculate total absence duration
-    // Find earliest departure and latest arrival
-    let earliestDepMinutes = Infinity;
-    let latestArrMinutes = -Infinity;
-
-    for (const flight of dayFlights) {
-      const depMinutes = parseTimeToMinutes(flight.departureTime);
-      const arrMinutes = parseTimeToMinutes(flight.arrivalTime);
-
-      earliestDepMinutes = Math.min(earliestDepMinutes, depMinutes);
-      latestArrMinutes = Math.max(latestArrMinutes, arrMinutes);
-    }
-
-    // Add Fahrzeit and briefing time to departure end, Fahrzeit to arrival end
-    const fahrzeitHours = fahrzeitMinutes / 60;
-    const earliestDepHours = earliestDepMinutes / 60;
-    const latestArrHours = latestArrMinutes / 60;
-
-    // Calculate briefing time based on duty code (for non-simulator flights)
-    // Check if any flight on this day has duty code 'A'
-    const hasAFlag = dayFlights.some(f => f.dutyCode === 'A');
-    // For domestic days, use the first flight's arrival as destination for briefing calculation
-    const firstFlight = dayFlights[0];
-    const briefingMinutes = hasAFlag 
-      ? getBriefingTimeForRole(role, aircraftType, firstFlight.arrival)
-      : 0;
-
-    let absenceHours: number;
-
-    if (hasSimulatorFlight) {
-      // Simulator flights: 60min pre-briefing + 60min post-briefing
-      const { preBriefing, postBriefing } = getSimulatorBriefingTimeMinutes();
-      const preBriefingHours = preBriefing / 60;
-      const postBriefingHours = postBriefing / 60;
-
-      // Total absence = (latest arrival + postBriefing + Fahrzeit) - (earliest departure - preBriefing - Fahrzeit)
-      // Pilot leaves home, travels to airport (Fahrzeit), does pre-briefing, flies, does post-briefing, travels home
-      absenceHours = (latestArrHours + postBriefingHours + fahrzeitHours) - (earliestDepHours - preBriefingHours - fahrzeitHours);
-    } else {
-      // Regular flights: use calculated briefing time
-      const briefingHours = briefingMinutes / 60;
-
-      // Total absence = (latest arrival + Fahrzeit) - (earliest departure - briefing - Fahrzeit)
-      // Pilot leaves home, travels to airport (Fahrzeit), does briefing, then departs
-      absenceHours = (latestArrHours + fahrzeitHours) - (earliestDepHours - briefingHours - fahrzeitHours);
-    }
     
-    // Only assign allowance if absence >= 8 hours (German tax law: >8h means 8h or more)
+    // Skip if already has allowance
+    if (dailyAllowances.has(dateStr)) continue;
+    
+    // Skip if has A/E flag (would be in abroad period)
+    if (flight.dutyCode === 'A' || flight.dutyCode === 'E') continue;
+    
+    // Only process simulator flights
+    if (!isSimulatorFlight(flight)) continue;
+    
+    // Calculate absence duration for simulator day
+    const briefingMinutes = getBriefingTimeForRole(role, aircraftType, flight.arrival, flight);
+    const postBriefingMinutes = getSimulatorBriefingTimeMinutes().postBriefing;
+    
+    const absenceHours = calculateAbsenceDuration(
+      flight, 
+      true,  // isDepDay
+      fahrzeitMinutes, 
+      briefingMinutes, 
+      postBriefingMinutes
+    );
+    
+    console.log(`Simulator day ${dateStr}: ${absenceHours.toFixed(2)}h absence (briefing: ${briefingMinutes}min pre + ${postBriefingMinutes}min post, fahrzeit: ${fahrzeitMinutes}min one-way)`);
+    
+    // Check 8-hour threshold for Deutschland allowance
     if (absenceHours >= 8) {
-      const yearForDay = dayFlights[0].year;
-      const domesticRates = getDomesticRates(yearForDay as AllowanceYear);
-      
-      // Determine rate type: partial (>8h) or full (>=24h, rare but possible)
-      const rate = absenceHours >= 24 ? domesticRates.RATE_24H : domesticRates.RATE_8H;
-      const rateType = absenceHours >= 24 ? '24h' : 'An/Ab';
+      const yearForDay = flight.year;
+      const rates = getDailyAllowanceRates('Deutschland', yearForDay as AllowanceYear);
       
       dailyAllowances.set(dateStr, {
         country: 'Deutschland',
         flag: '🇩🇪',
-        location: 'DE',
-        rate,
-        rateType,
+        location: flight.departure, // FRA or MUC
+        rate: rates[1],  // Partial rate (14€)
+        rateType: 'An/Ab',
         year: yearForDay,
-        isFirstDay: false,
-        isLastDay: false,
+        isFirstDay: true,
+        isLastDay: true,
         hasFlights: true,
-        isDepartureFromGermanyDay: false,
-        isReturnToGermanyDay: false,
-        briefingMinutes,
-        isLonghaul: isLonghaul(aircraftType)
+        briefingMinutes: briefingMinutes,
+        isLonghaul: false,
+        hasAllowanceQualified: true,
       });
       
-      console.log(`Added domestic flight day allowance for ${dateStr}: absence=${absenceHours.toFixed(2)}h, rate=${rate}€`);
+      console.log(`✓ Simulator day qualifies: ${rates[1]}€ Deutschland allowance`);
     } else {
-      console.log(`Domestic flight day ${dateStr}: absence=${absenceHours.toFixed(2)}h (<8h) - no allowance`);
+      console.log(`✗ Simulator day below 8h threshold (${absenceHours.toFixed(2)}h < 8h)`);
     }
   }
   
@@ -1417,9 +1470,7 @@ export function calculateMealAllowances(
   aircraftType?: string,
   role?: string
 ): {
-  domestic8h: { days: number; rate: number; total: number };
-  domestic24h: { days: number; rate: number; total: number };
-  foreign: { country: string; days: number; rate: number; total: number }[];
+  byCountry: CountryAllowanceBreakdown[];
   total: number;
 } {
   // Merge continuation flights with their parent flights from previous month
@@ -1435,47 +1486,38 @@ export function calculateMealAllowances(
   // Use the new daily allowance calculation
   const dailyAllowances = calculateDailyAllowances(sortedFlights, nonFlightDays, year, fahrzeitMinutes, aircraftType, role);
   
-  const domesticRates = getDomesticRates(year);
-  let domestic8hDays = 0;
-  let domestic24hDays = 0;
-  const foreignDays: Record<string, { days8h: number; days24h: number; rate8h: number; rate24h: number }> = {};
+  const countriesData: Record<string, { days8h: number; days24h: number; rate8h: number; rate24h: number }> = {};
   
-  // Aggregate the daily allowances
+  // Aggregate the daily allowances - treat all countries uniformly
   for (const [, allowance] of dailyAllowances) {
-    if (allowance.rate === 0) continue; // Skip days with no allowance
+    // Skip entries that don't qualify for allowances (informational only)
+    // For backwards compatibility, treat undefined as qualified (true)
+    if (allowance.hasAllowanceQualified === false) continue;
+    if (allowance.rate === 0) continue; // Additional safety check
     
-    // Check if this is a domestic (Germany) day or foreign day
-    if (allowance.country === 'Deutschland') {
-      // Domestic day
-      if (allowance.rateType === '24h') {
-        domestic24hDays++;
-      } else {
-        domestic8hDays++;
-      }
+    const country = allowance.country;
+    
+    // Initialize country data if not exists
+    if (!countriesData[country]) {
+      const rates = getDailyAllowanceRates(country, year);
+      countriesData[country] = {
+        days8h: 0,
+        days24h: 0,
+        rate8h: rates[1],
+        rate24h: rates[0],
+      };
+    }
+    
+    // Count the day based on rate type
+    if (allowance.rateType === '24h') {
+      countriesData[country].days24h++;
     } else {
-      // Foreign country day
-      if (!foreignDays[allowance.country]) {
-        const rates = getDailyAllowanceRates(allowance.country, year);
-        foreignDays[allowance.country] = {
-          days8h: 0,
-          days24h: 0,
-          rate8h: rates[1],
-          rate24h: rates[0],
-        };
-      }
-      
-      if (allowance.rateType === '24h') {
-        foreignDays[allowance.country].days24h++;
-      } else {
-        foreignDays[allowance.country].days8h++;
-      }
+      countriesData[country].days8h++;
     }
   }
   
   console.log('[DEBUG] Aggregation complete:', {
-    domestic8hDays,
-    domestic24hDays,
-    foreignDays: Object.entries(foreignDays).map(([c, d]) => ({
+    countries: Object.entries(countriesData).map(([c, d]) => ({
       country: c,
       days8h: d.days8h,
       days24h: d.days24h,
@@ -1484,24 +1526,29 @@ export function calculateMealAllowances(
     }))
   });
   
-  // Calculate totals
-  const domestic8hTotal = domestic8hDays * domesticRates.RATE_8H;
-  const domestic24hTotal = domestic24hDays * domesticRates.RATE_24H;
+  // Build the country breakdown array
+  const byCountry: CountryAllowanceBreakdown[] = Object.entries(countriesData)
+    .map(([country, data]) => {
+      const total8h = data.days8h * data.rate8h;
+      const total24h = data.days24h * data.rate24h;
+      return {
+        country,
+        days8h: data.days8h,
+        rate8h: data.rate8h,
+        total8h,
+        days24h: data.days24h,
+        rate24h: data.rate24h,
+        total24h,
+        totalCountry: total8h + total24h,
+      };
+    })
+    .sort((a, b) => a.country.localeCompare(b.country)); // Sort alphabetically
   
-  const foreignResult = Object.entries(foreignDays).map(([country, data]) => ({
-    country,
-    days: data.days8h + data.days24h,
-    rate: data.rate24h, // Show the 24h rate as reference
-    total: data.days8h * data.rate8h + data.days24h * data.rate24h,
-  }));
-  
-  const foreignTotal = foreignResult.reduce((sum, f) => sum + f.total, 0);
+  const total = byCountry.reduce((sum, c) => sum + c.totalCountry, 0);
   
   return {
-    domestic8h: { days: domestic8hDays, rate: domesticRates.RATE_8H, total: domestic8hTotal },
-    domestic24h: { days: domestic24hDays, rate: domesticRates.RATE_24H, total: domestic24hTotal },
-    foreign: foreignResult,
-    total: domestic8hTotal + domestic24hTotal + foreignTotal,
+    byCountry,
+    total,
   };
 }
 
@@ -1514,7 +1561,8 @@ export function calculateMonthlyBreakdown(
   settings: Settings,
   reimbursementData: ReimbursementData[] = [],
   aircraftType?: string,
-  detectedHomebase?: 'MUC' | 'FRA' | 'Unknown'
+  detectedHomebase?: 'MUC' | 'FRA' | 'Unknown',
+  role?: string
 ): MonthlyBreakdown[] {
   // Merge continuation flights with their parent flights from previous month
   const mergedFlights = mergeContinuationFlights(flights);
@@ -1570,7 +1618,7 @@ export function calculateMonthlyBreakdown(
     // Meal allowance (simplified - full calculation needs trip detection)
     const allowanceYear = year as AllowanceYear;
     const fahrzeitMinutes = getFahrzeitMinutes(settings);
-    const mealResult = calculateMealAllowances(data.flights, data.nonFlightDays, allowanceYear, fahrzeitMinutes, aircraftType);
+    const mealResult = calculateMealAllowances(data.flights, data.nonFlightDays, allowanceYear, fahrzeitMinutes, aircraftType, role);
     
     // Employer reimbursement for this month
     const monthlyReimbursement = reimbursementData
@@ -1663,9 +1711,7 @@ export function calculateTaxDeduction(
       rateAbove20km: distanceResult.rateAbove20km,
     },
     mealAllowances: {
-      domestic8h: mealResult.domestic8h,
-      domestic24h: mealResult.domestic24h,
-      foreign: mealResult.foreign,
+      byCountry: mealResult.byCountry,
       totalAllowances: Math.round(mealResult.total * 100) / 100,
       employerReimbursement: Math.round(employerReimbursement * 100) / 100,
       deductibleDifference: Math.round(deductibleDifference * 100) / 100,

@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useApp } from '../hooks';
-import { ChevronDown, ChevronRight, Filter, Plane, Calendar, Clock, Euro, Monitor } from 'lucide-react';
+import { ChevronDown, ChevronRight, Filter, Plane, Calendar, Clock, Euro, Monitor, Car } from 'lucide-react';
 import { MONTH_NAMES } from '../constants';
 import { getCountryName } from '../utils/airports';
 import { VirtualFlightTable } from './VirtualFlightTable';
@@ -14,12 +14,13 @@ interface MonthGroup {
   flightCount: number;
   totalHours: number;
   totalAllowance: number;
+  trips: number;
 }
 
 type SimulatorFilter = 'all' | 'simulator' | 'regular';
 
 export function FlightsTab() {
-  const { state, dailyAllowances } = useApp();
+  const { state, dailyAllowances, monthlyBreakdown } = useApp();
   const { flights, nonFlightDays } = state;
   const [countryFilter, setCountryFilter] = useState<string>('all');
   const [simulatorFilter, setSimulatorFilter] = useState<SimulatorFilter>('all');
@@ -56,6 +57,7 @@ export function FlightsTab() {
           flightCount: 0,
           totalHours: 0,
           totalAllowance: 0,
+          trips: 0,
         };
         groups.push(groupMap[key]);
       }
@@ -84,13 +86,19 @@ export function FlightsTab() {
       });
       
       group.totalAllowance = monthTotal;
+      
+      // Get trips from monthlyBreakdown
+      const monthData = monthlyBreakdown.find(
+        (m) => m.month === group.month && m.year === group.year
+      );
+      group.trips = monthData?.trips || 0;
     }
 
     return groups.sort((a, b) => {
       if (a.year !== b.year) return a.year - b.year;
       return a.month - b.month;
     });
-  }, [flights, nonFlightDays, dailyAllowances]);
+  }, [flights, nonFlightDays, dailyAllowances, monthlyBreakdown]);
 
   // State for expanded months - will be populated by useEffect
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
@@ -248,6 +256,10 @@ export function FlightsTab() {
                   </span>
                 </div>
                 <div className="flex items-center gap-4 text-sm text-slate-600 dark:text-slate-300">
+                  <span className="flex items-center gap-1">
+                    <Car className="w-4 h-4" />
+                    {group.trips}
+                  </span>
                   <span className="flex items-center gap-1">
                     <Plane className="w-4 h-4" />
                     {monthFlights.length}

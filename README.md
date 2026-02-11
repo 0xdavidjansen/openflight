@@ -97,9 +97,10 @@ npm run test:coverage  # With coverage report
 ## 📊 What Gets Calculated
 
 ### Verpflegungsmehraufwand (Meal Allowances)
-- **Foreign Travel**: Departure day (≥8h absence) and arrival day = partial rate; full days abroad = full rate
-- **Domestic Travel**: Only pure domestic flights with >8h absence = partial rate (€14)
-- **City-Specific Rates**: Automatically applies higher rates for major cities (e.g., New York, Mumbai)
+- **Country-Specific Rates**: Calculated based on German tax law (Bundesfinanzministerium) rates for each country
+- **Partial Rate (>8h)**: Applied for day trips or arrival/departure days with >8 hours absence
+- **Full Rate (24h)**: Applied for full days with overnight stay
+- **City-Specific Rates**: Automatically applies higher rates for major cities (e.g., New York, Mumbai, Paris)
 - **Employer Reimbursement**: Automatically subtracted from total
 
 ### Entfernungspauschale (Distance Deduction)

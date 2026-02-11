@@ -243,34 +243,31 @@ export function SummaryTab() {
               Verpflegungsmehraufwendungen
             </h4>
             <div className="space-y-2 text-sm">
-              {taxCalculation.mealAllowances.domestic8h.days > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-purple-600 dark:text-purple-400">
-                    Inland {'>'} 8h: {taxCalculation.mealAllowances.domestic8h.days} Tage × {formatCurrency(taxCalculation.mealAllowances.domestic8h.rate)}
-                  </span>
-                  <span className="text-purple-800 dark:text-purple-200">
-                    {formatCurrency(taxCalculation.mealAllowances.domestic8h.total)}
-                  </span>
-                </div>
-              )}
-              {taxCalculation.mealAllowances.domestic24h.days > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-purple-600 dark:text-purple-400">
-                    Inland 24h: {taxCalculation.mealAllowances.domestic24h.days} Tage × {formatCurrency(taxCalculation.mealAllowances.domestic24h.rate)}
-                  </span>
-                  <span className="text-purple-800 dark:text-purple-200">
-                    {formatCurrency(taxCalculation.mealAllowances.domestic24h.total)}
-                  </span>
-                </div>
-              )}
-              {taxCalculation.mealAllowances.foreign.map((f) => (
-                <div key={f.country} className="flex justify-between">
-                  <span className="text-purple-600 dark:text-purple-400">
-                    {f.country}: {f.days} Tage
-                  </span>
-                  <span className="text-purple-800 dark:text-purple-200">
-                    {formatCurrency(f.total)}
-                  </span>
+              {taxCalculation.mealAllowances.byCountry.map((country) => (
+                <div key={country.country} className="space-y-1">
+                  <div className="font-medium text-purple-700 dark:text-purple-300">
+                    {country.country}
+                  </div>
+                  {country.days8h > 0 && (
+                    <div className="flex justify-between pl-4">
+                      <span className="text-purple-600 dark:text-purple-400">
+                        {'>'} 8h: {country.days8h} Tage × {formatCurrency(country.rate8h)}
+                      </span>
+                      <span className="text-purple-800 dark:text-purple-200">
+                        {formatCurrency(country.total8h)}
+                      </span>
+                    </div>
+                  )}
+                  {country.days24h > 0 && (
+                    <div className="flex justify-between pl-4">
+                      <span className="text-purple-600 dark:text-purple-400">
+                        24h: {country.days24h} Tage × {formatCurrency(country.rate24h)}
+                      </span>
+                      <span className="text-purple-800 dark:text-purple-200">
+                        {formatCurrency(country.total24h)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               ))}
               <div className="flex justify-between border-t border-purple-200 dark:border-purple-700 pt-2">

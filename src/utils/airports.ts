@@ -502,12 +502,7 @@ export function getCountryFromAirport(iataCode: string): string {
   return AIRPORT_COUNTRIES[code] || 'XX'; // XX for unknown
 }
 
-/**
- * Check if an airport is in Germany
- */
-export function isDomesticAirport(iataCode: string): boolean {
-  return getCountryFromAirport(iataCode) === 'DE';
-}
+
 
 /**
  * Get all unique countries from a list of airport codes

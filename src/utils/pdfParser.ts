@@ -295,10 +295,11 @@ export async function parseFlugstundenPDF(file: File): Promise<{
     }
   }
   
-  // Parse ground duty days (EM, RE, DP, DT, SI, TK, SB)
+  // Parse ground duty days (EM, RE, RB, DP, DT, SI, TK, SB)
   const groundDutyPatterns = [
     { pattern: /(\d{2})\.(\d{2})\.[\s\n]*EM[\s\n]+EMERGENCY-TRAINING/g, type: 'EM' as const },
     { pattern: /(\d{2})\.(\d{2})\.[\s\n]*RE[\s\n]+BEREITSCHAFT \(RESERVE\)/g, type: 'RE' as const },
+    { pattern: /(\d{2})\.(\d{2})\.[\s\n]*RB[\s\n]+RUFBEREITSCHAFT/g, type: 'RB' as const },
     { pattern: /(\d{2})\.(\d{2})\.[\s\n]*DP[\s\n]+BUERODIENST/g, type: 'DP' as const },
     { pattern: /(\d{2})\.(\d{2})\.[\s\n]*DT[\s\n]+BUERODIENST/g, type: 'DT' as const },
     { pattern: /(\d{2})\.(\d{2})\.[\s\n]*SI[\s\n]+SIMULATOR/g, type: 'SI' as const },
@@ -619,29 +620,15 @@ export async function parseStreckeneinsatzPDF(file: File): Promise<{
     }
   }
   
-  // Extract day counts if available
-  let domesticDays8h = 0;
-  let domesticDays24h = 0;
-  const foreignDays: { country: string; days: number; rate: number }[] = [];
-  
-  // Try to parse specific day counts
-  const days8hMatch = fullText.match(/>?\s*8\s*(?:Std|h)[:\s]*(\d+)/i);
-  if (days8hMatch) {
-    domesticDays8h = parseInt(days8hMatch[1], 10);
-  }
-  
-  const days24hMatch = fullText.match(/24\s*(?:Std|h)[:\s]*(\d+)/i);
-  if (days24hMatch) {
-    domesticDays24h = parseInt(days24hMatch[1], 10);
-  }
+  // Note: Day counts are now calculated automatically from flight data
+  // Legacy PDF parsing for day counts is no longer supported
+  const countryDays: { country: string; days8h: number; days24h: number; rate8h: number; rate24h: number }[] = [];
   
   const reimbursementData: ReimbursementData = {
     month,
     year,
     taxFreeReimbursement,
-    domesticDays8h,
-    domesticDays24h,
-    foreignDays,
+    countryDays,
   };
   
   const fileInfo: UploadedFile = {
@@ -703,6 +690,18 @@ function extractPersonalInfo(text: string): PersonalInfo | null {
   );
   const dutyStation = dutyStationMatch ? dutyStationMatch[1].trim() : '';
 
+  // Parse homebase from Dienstelle field
+  // The Dienstelle field typically starts with FRA or MUC (e.g., "FRA", "MUC", "FRA-CC", etc.)
+  let parsedHomebase: 'MUC' | 'FRA' | null = null;
+  if (dutyStation) {
+    const homebasePrefix = dutyStation.substring(0, 3).toUpperCase();
+    if (homebasePrefix === 'FRA') {
+      parsedHomebase = 'FRA';
+    } else if (homebasePrefix === 'MUC') {
+      parsedHomebase = 'MUC';
+    }
+  }
+
   // Extract role/function
   const roleMatch = text.match(
     /Funktion[:\s]*([A-ZÄÖÜa-zäöüß0-9\s/.-]+?)(?=Muster|Hinweise|Dienststelle|Name|Personal|$)/i
@@ -755,6 +754,7 @@ function extractPersonalInfo(text: string): PersonalInfo | null {
     pkNumber: pkNumber || undefined,
     documentDate: documentDate || undefined,
     sheetNumber: sheetNumber || undefined,
+    parsedHomebase: parsedHomebase ?? undefined,
   };
 }
 
@@ -767,6 +767,7 @@ function getDutyDescription(code: string): string {
     FL: 'Streckeneinsatztag',
     EM: 'Emergency Schulung',
     RE: 'Reserve',
+    RB: 'Rufbereitschaft',
     DP: 'Dispatch',
     DT: 'Duty Time',
     SI: 'Simulator Training',

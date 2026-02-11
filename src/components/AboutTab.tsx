@@ -57,8 +57,9 @@ export function AboutTab() {
               </h3>
               <p className="text-sm text-slate-600 dark:text-slate-300 space-y-2">
                 <span className="block">
-                  <strong>Ausland:</strong> Anreisetag (Abwesenheit ≥8h) und Abreisetag = Teilbetrag. 
-                  Volle Tage im Ausland = Volltag. Länderspezifische BMF-Sätze, inkl. städtespezifischer Zuschläge (z.B. NYC, Mumbai).
+                  Berechnet nach länderspezifischen BMF-Sätzen. Teilbetrag (&gt;8h) für Tagesreisen oder An-/Abreisetage,
+                  Vollbetrag (24h) für volle Tage mit Übernachtung. Städtespezifische Zuschläge werden automatisch angewendet
+                  (z.B. NYC, Paris, Mumbai). Vom Ergebnis wird die Arbeitgebererstattung abgezogen.
                 </span>
                 <span className="block">
                   <strong>Inland:</strong> Nur reine Inlandsflüge mit Abwesenheit &gt;8h = Teilbetrag (14€). 
