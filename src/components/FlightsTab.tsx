@@ -21,7 +21,7 @@ type SimulatorFilter = 'all' | 'simulator' | 'regular';
 
 export function FlightsTab() {
   const { state, dailyAllowances, monthlyBreakdown } = useApp();
-  const { flights, nonFlightDays } = state;
+  const { flights, nonFlightDays, personalInfo } = state;
   const [countryFilter, setCountryFilter] = useState<string>('all');
   const [simulatorFilter, setSimulatorFilter] = useState<SimulatorFilter>('all');
 
@@ -282,6 +282,7 @@ export function FlightsTab() {
                     flights={monthFlights}
                     nonFlightDays={monthNonFlightDays}
                     dailyAllowances={dailyAllowances}
+                    personalInfo={personalInfo}
                   />
                 </div>
               )}

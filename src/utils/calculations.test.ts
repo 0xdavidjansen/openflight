@@ -1084,7 +1084,7 @@ describe('calculateAbsenceDuration with briefing time', () => {
     expect(absence).toBeCloseTo(18.833, 2)
   })
 
-  it('does NOT add briefing time on return day', () => {
+  it('does NOT add pre-briefing time on return day but adds post-briefing', () => {
     const flight: Flight = {
       id: 'test-2',
       date: new Date('2024-01-17'),
@@ -1102,13 +1102,14 @@ describe('calculateAbsenceDuration with briefing time', () => {
 
     const fahrzeitMinutes = 60
     const briefingMinutes = 110
+    const postBriefingMinutes = 30
 
-    // Return day: arrHour + fahrzeit = 8 + 1 = 9 (no briefing)
-    const absence = calculateAbsenceDuration(flight, false, fahrzeitMinutes, briefingMinutes)
-    expect(absence).toBeCloseTo(9, 2)
+    // Return day: arrHour + postBriefing + fahrzeit = 8 + 0.5 + 1 = 9.5 (no pre-briefing)
+    const absence = calculateAbsenceDuration(flight, false, fahrzeitMinutes, briefingMinutes, postBriefingMinutes)
+    expect(absence).toBeCloseTo(9.5, 2)
   })
 
-  it('without briefing (shorthaul/default), behavior is unchanged', () => {
+  it('adds post-briefing time on same-day flight', () => {
     const flight: Flight = {
       id: 'test-3',
       date: new Date('2024-01-15'),
@@ -1125,11 +1126,12 @@ describe('calculateAbsenceDuration with briefing time', () => {
     }
 
     const fahrzeitMinutes = 60
-    // No briefing (default = 0)
-    const absence = calculateAbsenceDuration(flight, true, fahrzeitMinutes, 0)
+    const postBriefingMinutes = 30
+    // No pre-briefing for shorthaul = 0
+    const absence = calculateAbsenceDuration(flight, true, fahrzeitMinutes, 0, postBriefingMinutes)
     // Same-day flight: fahrzeit + briefing + flightDuration + postBriefing + fahrzeit
-    // = 1 + 0 + 1 + 0 + 1 = 3
-    expect(absence).toBe(3)
+    // = 1 + 0 + 1 + 0.5 + 1 = 3.5
+    expect(absence).toBe(3.5)
   })
 
   it('adds briefing time for overnight longhaul departure', () => {
@@ -1225,20 +1227,49 @@ describe('calculateAbsenceDuration with briefing time', () => {
 
     const fahrzeitMinutes = 7.5 // 15km * 0.5min/km
     const briefingMinutes = 85 // Cabin crew shorthaul to Ireland
+    const postBriefingMinutes = 30 // 30min de-briefing
 
     // Calculate absence with multiple flights (new behavior)
-    const absence = calculateAbsenceDuration(flights, true, fahrzeitMinutes, briefingMinutes, 0)
+    const absence = calculateAbsenceDuration(flights, true, fahrzeitMinutes, briefingMinutes, postBriefingMinutes)
     
     // Expected calculation:
     // Commute: 7.5min = 0.125h
     // Briefing: 85min = 1.417h
     // Flight span: 13:35 - 05:03 = 8.533h
+    // Post-briefing: 30min = 0.5h
     // Commute home: 7.5min = 0.125h
-    // Total: 0.125 + 1.417 + 8.533 + 0.125 = 10.2h
-    expect(absence).toBeCloseTo(10.2, 1)
+    // Total: 0.125 + 1.417 + 8.533 + 0.5 + 0.125 = 10.7h
+    expect(absence).toBeCloseTo(10.7, 1)
     
     // Verify it's above 8-hour threshold for Deutschland allowance
     expect(absence).toBeGreaterThan(8)
+  })
+
+  it('adds 30min de-briefing time to same-day longhaul flights', () => {
+    const flight: Flight = {
+      id: 'test-debriefing',
+      date: new Date('2024-06-15'),
+      month: 6,
+      year: 2024,
+      flightNumber: 'LH456',
+      departure: 'FRA',
+      arrival: 'JFK',
+      departureTime: '10:00',
+      arrivalTime: '18:00',
+      blockTime: '8:00',
+      dutyCode: 'A',
+      isContinuation: false,
+      country: 'US',
+    }
+
+    const fahrzeitMinutes = 60 // 1 hour commute
+    const briefingMinutes = 110 // 1h50 pre-briefing for longhaul
+    const postBriefingMinutes = 30 // 30min de-briefing
+
+    // Same-day longhaul: fahrzeit + briefing + flight + post-briefing + fahrzeit
+    // = 1 + 1.833 + 8 + 0.5 + 1 = 12.333h
+    const absence = calculateAbsenceDuration(flight, true, fahrzeitMinutes, briefingMinutes, postBriefingMinutes)
+    expect(absence).toBeCloseTo(12.333, 2)
   })
 })
 
@@ -1458,12 +1489,12 @@ describe('Same-day flight absence calculation', () => {
 
     const fahrzeitMinutes = 60  // 1h one-way
     const briefingMinutes = 80   // 80min for shorthaul
-    const postBriefingMinutes = 0
+    const postBriefingMinutes = 30  // 30min de-briefing
 
     const absence = calculateAbsenceDuration(flight, true, fahrzeitMinutes, briefingMinutes, postBriefingMinutes)
 
-    // Expected: 1h commute + 1.33h briefing + 1h flight + 0 post + 1h return = 4.33h
-    expect(absence).toBeCloseTo(4.33, 2)
+    // Expected: 1h commute + 1.33h briefing + 1h flight + 0.5h post + 1h return = 4.83h
+    expect(absence).toBeCloseTo(4.83, 2)
   })
 
   it('calculates correct absence for simulator flight', () => {

@@ -1,16 +1,18 @@
 import { useRef, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { Flight, NonFlightDay, DailyAllowanceInfo, AllowanceYear } from '../types';
+import type { Flight, NonFlightDay, DailyAllowanceInfo, AllowanceYear, PersonalInfo } from '../types';
 import { DUTY_CODES } from '../constants';
 import { DEFAULT_ALLOWANCE_YEAR } from '../utils/allowances';
 import { getCountryName } from '../utils/airports';
 import { getCountryAllowance } from '../utils/allowances';
-import { formatCurrency, formatDateStr, isSimulatorFlight } from '../utils/calculations';
+import { formatCurrency, formatDateStr, isSimulatorFlight, getBriefingTimeForRole } from '../utils/calculations';
+import { Clock } from 'lucide-react';
 
 interface VirtualFlightTableProps {
   flights: Flight[];
   nonFlightDays: NonFlightDay[];
   dailyAllowances?: Map<string, DailyAllowanceInfo>;
+  personalInfo?: PersonalInfo | null;
 }
 
 // Combined row type for virtualization
@@ -18,7 +20,7 @@ type TableRow =
   | { type: 'flight'; data: Flight; isFirstOfDay: boolean }
   | { type: 'nonFlightDay'; data: NonFlightDay };
 
-export function VirtualFlightTable({ flights, nonFlightDays, dailyAllowances }: VirtualFlightTableProps) {
+export function VirtualFlightTable({ flights, nonFlightDays, dailyAllowances, personalInfo }: VirtualFlightTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
 
   // Identify first flights per day
@@ -76,7 +78,7 @@ export function VirtualFlightTable({ flights, nonFlightDays, dailyAllowances }: 
           <tbody>
             {rows.map((row) =>
               row.type === 'flight' ? (
-                <FlightRow key={row.data.id} flight={row.data} dailyAllowances={dailyAllowances} isFirstOfDay={row.isFirstOfDay} />
+                <FlightRow key={row.data.id} flight={row.data} dailyAllowances={dailyAllowances} isFirstOfDay={row.isFirstOfDay} personalInfo={personalInfo} />
               ) : (
                 <NonFlightDayRow key={row.data.id} day={row.data} dailyAllowances={dailyAllowances} flights={flights} />
               )
@@ -120,7 +122,7 @@ export function VirtualFlightTable({ flights, nonFlightDays, dailyAllowances }: 
                     }}
                   >
                     {row.type === 'flight' ? (
-                      <FlightRowContent flight={row.data} dailyAllowances={dailyAllowances} isFirstOfDay={row.isFirstOfDay} />
+                      <FlightRowContent flight={row.data} dailyAllowances={dailyAllowances} isFirstOfDay={row.isFirstOfDay} personalInfo={personalInfo} />
                     ) : (
                       <NonFlightDayRowContent day={row.data} dailyAllowances={dailyAllowances} flights={flights} />
                     )}
@@ -139,11 +141,14 @@ function TableHeader() {
   return (
     <thead>
       <tr className="border-b border-slate-200 dark:border-slate-700">
-        <th className="text-left py-2 pl-2 pr-0 font-medium text-slate-600 dark:text-slate-300">
+        <th className="text-left py-2 px-2 font-medium text-slate-600 dark:text-slate-300">
           Datum
         </th>
-        <th className="text-left py-0 px-0 font-medium text-slate-600 dark:text-slate-300 w-0">
-          Briefing
+        <th className="text-left py-2 px-2 font-medium text-slate-600 dark:text-slate-300">
+          <div className="flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5" />
+            <span>Briefing</span>
+          </div>
         </th>
         <th className="text-left py-2 px-2 font-medium text-slate-600 dark:text-slate-300">
           Flug/Status
@@ -168,15 +173,15 @@ function TableHeader() {
   );
 }
 
-function FlightRow({ flight, dailyAllowances, isFirstOfDay }: { flight: Flight; dailyAllowances?: Map<string, DailyAllowanceInfo>; isFirstOfDay: boolean }) {
+function FlightRow({ flight, dailyAllowances, isFirstOfDay, personalInfo }: { flight: Flight; dailyAllowances?: Map<string, DailyAllowanceInfo>; isFirstOfDay: boolean; personalInfo?: PersonalInfo | null }) {
   return (
     <tr className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30">
-      <FlightRowContent flight={flight} dailyAllowances={dailyAllowances} isFirstOfDay={isFirstOfDay} />
+      <FlightRowContent flight={flight} dailyAllowances={dailyAllowances} isFirstOfDay={isFirstOfDay} personalInfo={personalInfo} />
     </tr>
   );
 }
 
-function FlightRowContent({ flight, dailyAllowances, isFirstOfDay }: { flight: Flight; dailyAllowances?: Map<string, DailyAllowanceInfo>; isFirstOfDay: boolean }) {
+function FlightRowContent({ flight, dailyAllowances, isFirstOfDay, personalInfo }: { flight: Flight; dailyAllowances?: Map<string, DailyAllowanceInfo>; isFirstOfDay: boolean; personalInfo?: PersonalInfo | null }) {
   // Use arrival country for display
   const countryCode = flight.arrivalCountry || 'XX';
 
@@ -187,23 +192,58 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay }: { flight: F
   const dateStr = formatDateStr(flight.date);
   const dailyAllowance = dailyAllowances?.get(dateStr);
 
+  // Calculate briefing time for this flight
+  const briefingMinutes = getBriefingTimeForRole(
+    personalInfo?.role,
+    personalInfo?.aircraftType,
+    flight.arrival,
+    flight
+  );
+
+  // Format briefing time (e.g., "1h 50min" or "60min")
+  const formatBriefingTime = (minutes: number): string => {
+    if (minutes === 0) return '-';
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours === 0) {
+      return `${mins}min`;
+    } else if (mins === 0) {
+      return `${hours}h`;
+    } else {
+      return `${hours}h ${mins}min`;
+    }
+  };
+
+  // Determine briefing badge color based on duration
+  const getBriefingColor = (minutes: number) => {
+    if (minutes === 0) return '';
+    if (minutes >= 110) {
+      // Longhaul
+      return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400';
+    } else if (minutes >= 80) {
+      // Shorthaul
+      return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+    } else {
+      // Simulator or other
+      return 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400';
+    }
+  };
+
   return (
     <>
-      <td className="py-2 pl-2 pr-0">
+      <td className="py-2 px-2">
         {flight.date.toLocaleDateString('de-DE', {
           day: '2-digit',
           month: '2-digit',
         })}
       </td>
-      <td className="py-0 px-0 w-0 whitespace-nowrap">
-        {dailyAllowance && dailyAllowance.briefingMinutes && dailyAllowance.briefingMinutes > 0 && flight.dutyCode === 'A' && (
-          <span
-            className="px-1.5 py-0.5 text-xs rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
-            title={`Briefing: ${dailyAllowance.briefingMinutes} Minuten`}
-          >
-            📋 {dailyAllowance.briefingMinutes}min
+      <td className="py-2 px-2">
+        {isFirstOfDay && briefingMinutes > 0 ? (
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${getBriefingColor(briefingMinutes)}`}>
+            <Clock className="w-3 h-3" />
+            {formatBriefingTime(briefingMinutes)}
           </span>
-        )}
+        ) : null}
       </td>
       <td className="py-2 px-2">
         <div className="flex items-center gap-2">
@@ -211,9 +251,9 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay }: { flight: F
           {isSimulator && (
             <span
               className="px-1.5 py-0.5 text-xs rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400"
-              title="Simulator-Tag (LH9xxx, FRA→FRA oder MUC→MUC, 4:00 Block) - Briefing: 60min vor + 60min nach = 120min gesamt"
+              title="Simulator-Tag (LH9xxx, FRA→FRA oder MUC→MUC, 4:00 Block)"
             >
-              Simulator (60min + 60min)
+              Simulator
             </span>
           )}
           {flight.isContinuation && (
@@ -340,14 +380,11 @@ function NonFlightDayRowContent({ day, dailyAllowances, flights }: { day: NonFli
 
   return (
     <>
-      <td className="py-2 pl-2 pr-0">
+      <td className="py-2 px-2">
         {day.date.toLocaleDateString('de-DE', {
           day: '2-digit',
           month: '2-digit',
         })}
-      </td>
-      <td className="py-0 px-0 w-0">
-        {/* Empty briefing column for non-flight days */}
       </td>
       <td className="py-2 px-2">
         <span
@@ -362,6 +399,7 @@ function NonFlightDayRowContent({ day, dailyAllowances, flights }: { day: NonFli
           {day.type}
         </span>
       </td>
+      <td className="py-2 px-2"></td>
       <td
         className="py-2 px-2 text-slate-600 dark:text-slate-400"
         colSpan={3}

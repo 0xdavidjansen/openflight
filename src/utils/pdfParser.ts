@@ -766,6 +766,7 @@ function getDutyDescription(code: string): string {
     ME: 'Medizinische Untersuchung',
     FL: 'Streckeneinsatztag',
     EM: 'Emergency Schulung',
+    SEC: 'SEC+EM.Schulung',
     RE: 'Reserve',
     RB: 'Rufbereitschaft',
     DP: 'Dispatch',
@@ -895,3 +896,5 @@ export function checkMissingMonths(
   
   return warnings;
 }
+
+

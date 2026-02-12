@@ -13,6 +13,7 @@ export const DUTY_CODES = {
   ME: 'Medizinische Untersuchung',
   FL: 'Auslandstag',
   EM: 'Emergency Schulung',
+  SEC: 'SEC+EM.Schulung',
   RE: 'Reserve',
   RB: 'Rufbereitschaft',
   DP: 'Dispatch',
@@ -22,14 +23,13 @@ export const DUTY_CODES = {
   SB: 'Standby'
 } as const;
 
-export const GROUND_DUTY_CODES = ['EM', 'RE', 'RB', 'DP', 'DT', 'SI', 'TK', 'SB'] as const;
+export const GROUND_DUTY_CODES = ['EM', 'SEC', 'RE', 'RB', 'DP', 'DT', 'SI', 'TK', 'SB'] as const;
 export type GroundDutyCode = typeof GROUND_DUTY_CODES[number];
 
 // Briefing times (in minutes)
 export const BRIEFING_TIME_LONGHAUL_MINUTES = 110; // 1h50m before departure
 export const BRIEFING_TIME_SIMULATOR_MINUTES = 120; // 60min before + 60min after
-// Note: Shorthaul briefing times are role-based (80min flight crew, 85min cabin crew)
-// and calculated via getBriefingTimeForRole() function
+export const POST_BRIEFING_TIME_MINUTES = 30; // 30min after arrival for regular flights
 // Note: Shorthaul briefing times are role-based (80min flight crew, 85min cabin crew)
 // and calculated via getBriefingTimeForRole() function
 

@@ -17,6 +17,7 @@ import { MONTH_NAMES, GROUND_DUTY_CODES } from '../types';
 import {
   LONGHAUL_AIRCRAFT_TYPES,
   BRIEFING_TIME_SIMULATOR_MINUTES,
+  POST_BRIEFING_TIME_MINUTES,
 } from '../constants';
 import { 
   DISTANCE_RATES, 
@@ -146,7 +147,7 @@ export function formatDateStr(date: Date): string {
  * @param isDepDay True if departure day, false if return day
  * @param fahrzeitMinutes Travel time to airport in minutes (one way)
  * @param briefingMinutes Briefing time before departure in minutes (only applied on departure day for outbound flights)
- * @param postBriefingMinutes Briefing time after arrival in minutes (for simulator flights)
+ * @param postBriefingMinutes Briefing time after arrival in minutes (applied on same-day and return flights)
  */
 export function calculateAbsenceDuration(
   flightOrFlights: Flight | Flight[],
@@ -197,8 +198,9 @@ export function calculateAbsenceDuration(
       return fahrzeit + briefing + flightDuration + postBriefing + fahrzeit;
     }
   } else {
+    // Return day: arrival time + post-briefing + commute home
     const arrHour = parseTimeToHours(flight.arrivalTime);
-    return arrHour + fahrzeit;
+    return arrHour + postBriefing + fahrzeit;
   }
 }
 
@@ -1230,10 +1232,12 @@ export function calculateDailyAllowances(
         ? getBriefingTimeForRole(role, aircraftType, firstAFlight.arrival, firstAFlight)
         : 0;
       
-      // Calculate post-briefing time (only for simulator flights)
+      // Calculate post-briefing time
+      // Simulator flights: 60 minutes post-briefing
+      // Regular flights: 30 minutes de-briefing
       const postBriefingMinutes = firstFlight && isSimulatorFlight(firstFlight)
         ? getSimulatorBriefingTimeMinutes().postBriefing  // Returns 60 minutes
-        : 0;
+        : POST_BRIEFING_TIME_MINUTES;  // 30 minutes for regular flights
       
       // Determine rate type according to German tax law
       let rate: number, rateType: '24h' | 'An/Ab' | 'none';

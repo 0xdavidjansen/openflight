@@ -11,7 +11,7 @@ A web-based tax deduction calculator specifically designed for German airline pi
 - **📄 PDF Parsing** - Automatically extracts flight data from Lufthansa Flugstunden-Übersicht and Streckeneinsatz-Abrechnung PDFs
 - **🌍 Meal Allowances (Verpflegungsmehraufwand)** - Calculates allowances based on BMF rates (2023-2025) with city-specific rates for major destinations
 - **🚗 Commuting Deductions (Entfernungspauschale)** - Automatic calculation with year-specific rates (€0.30/€0.38 per km)
-- **⏱️ Briefing Time** - Accounts for pre-departure briefing time (1h50 for longhaul flights on A330/A340/A350/A380/B747/B777/B787)
+- **⏱️ Briefing & De-Briefing Time** - Accounts for pre-departure briefing (destination-based) and 30-minute post-flight de-briefing time
 - **🏨 Hotel Night Expenses** - Tracks overnight stays abroad for tip deductions
 - **📊 Work Days & Trips** - Automatic counting with configurable rules
 
@@ -109,9 +109,14 @@ npm run test:coverage  # With coverage report
 - Multiplied by number of trips
 
 ### Briefing Time Logic
-- **Longhaul** (A330/A340/A350/A380/B747/B777/B787): Duty starts 1h50 before departure
-- **Shorthaul** (A320 family): Currently no additional time (configurable in future)
-- Increases total absence duration, which can affect allowance eligibility
+- **Pre-Briefing (Departure Days)**:
+  - **Longhaul** (intercontinental destinations): 110 minutes (1h50) before departure
+  - **Shorthaul** (European destinations): 80 minutes (flight crew) / 85 minutes (cabin crew) before departure
+  - **Simulator flights**: 60 minutes before session
+- **De-Briefing (After Arrival)**:
+  - **Regular flights**: 30 minutes after arrival (applies to same-day and return flights)
+  - **Simulator flights**: 60 minutes after session
+- Briefing times increase total absence duration, which can affect allowance eligibility
 
 ### Cleaning Costs & Tips
 - Cleaning costs = work days × rate per day

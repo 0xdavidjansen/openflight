@@ -235,6 +235,32 @@ function AppContextInner({ children }: { children: React.ReactNode }) {
     return calculateDailyAllowances(sortedFlights, deferredNonFlightDays, 2025, fahrzeitMinutes, deferredAircraftType, deferredRole);
   }, [deferredFlights, deferredNonFlightDays, deferredSettings, deferredAircraftType, deferredRole]);
 
+  // Reactively warn about months with flights but no AG-Erstattung
+  // Debounced to wait for all files in a batch upload to finish processing
+  React.useEffect(() => {
+    if (flightState.isLoading) return;
+    if (monthlyBreakdown.length === 0) return;
+
+    const timer = setTimeout(() => {
+      const missingReimbursementWarnings = monthlyBreakdown
+        .filter((m) => m.workDays > 0 && m.employerReimbursement === 0)
+        .map((m) => ({
+          id: `missing-reimbursement-${m.year}-${m.month}`,
+          type: 'missing_month' as const,
+          severity: 'warning' as const,
+          message: `AG-Erstattung für ${m.month}/${m.year} fehlt`,
+          details: `Für diesen Monat wurden Flugdaten hochgeladen, aber keine Streckeneinsatzabrechnung (AG-Erstattung) gefunden. Bitte laden Sie die Streckeneinsatzabrechnung für ${m.month}/${m.year} hoch, um korrekte Berechnungen zu erhalten.`,
+          dismissible: true,
+        }));
+
+      if (missingReimbursementWarnings.length > 0) {
+        addWarnings(missingReimbursementWarnings);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [flightState.isLoading, monthlyBreakdown, addWarnings]);
+
   const totalFlightHours = useMemo(
     () => monthlyBreakdown.reduce((sum, m) => sum + m.flightHours, 0),
     [monthlyBreakdown]

@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useApp } from '../hooks';
 import { User, Calendar, Hash, Building, Plane } from 'lucide-react';
-import { getBriefingTimeForRole, resolveHomebase, detectHomebase } from '../utils/calculations';
+import { resolveHomebase, detectHomebase } from '../utils/calculations';
 
 export function InfoTab() {
   const { state } = useApp();
@@ -20,27 +20,6 @@ export function InfoTab() {
     if (years.length === 1) return years[0].toString();
     return `${years[0]} - ${years[years.length - 1]}`;
   }, [flights]);
-
-  // Calculate briefing time based on role and aircraft type
-  // For cabin crew, show both shorthaul and longhaul times since it varies by destination
-  const briefingInfo = useMemo(() => {
-    const role = personalInfo?.role?.toLowerCase() || '';
-    const isCabinCrew = role.includes('cabin') || role.startsWith('fb') || role.startsWith('pu');
-    
-    if (isCabinCrew) {
-      return {
-        isVariable: true as const,
-        shorthaul: 85,
-        longhaul: 110,
-      };
-    }
-    
-    // For flight crew, return single value based on aircraft
-    return {
-      isVariable: false as const,
-      time: getBriefingTimeForRole(personalInfo?.role, personalInfo?.aircraftType),
-    };
-  }, [personalInfo?.role, personalInfo?.aircraftType]);
 
   return (
     <div className="space-y-6">
@@ -119,22 +98,13 @@ export function InfoTab() {
                     </div>
                   </div>
                 )}
-                {personalInfo.aircraftType && (
+                {personalInfo.aircraftType && !(personalInfo.role?.includes('PU') || personalInfo.role?.includes('FB')) && (
                   <div className="flex items-center gap-3">
                     <Plane className="w-4 h-4 text-slate-400" />
                     <div>
                       <p className="text-xs text-slate-500 dark:text-slate-400">Muster</p>
                       <p className="font-medium text-slate-800 dark:text-white">
                         {personalInfo.aircraftType}
-                        {briefingInfo.isVariable ? (
-                          <span className="text-slate-600 dark:text-slate-400">
-                            {' '}(Briefing: {briefingInfo.shorthaul}min Kurzstrecke / {briefingInfo.longhaul}min Langstrecke)
-                          </span>
-                        ) : !briefingInfo.isVariable && briefingInfo.time && briefingInfo.time > 0 ? (
-                          <span className="text-slate-600 dark:text-slate-400">
-                            {' '}(Briefing {briefingInfo.time} min)
-                          </span>
-                        ) : null}
                       </p>
                     </div>
                   </div>

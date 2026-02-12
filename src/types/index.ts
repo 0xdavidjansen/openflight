@@ -30,7 +30,7 @@ export interface Flight {
   departureTime: string; // HH:MM
   arrivalTime: string; // HH:MM
   blockTime: string; // HH:MM flight duration
-  dutyCode?: string; // A, E, ME, FL, EM, RE, RB, DP, DT, SI, TK, SB
+  dutyCode?: string; // A, E, ME, FL, EM, SEC, RE, RB, DP, DT, SI, TK, SB
   isContinuation: boolean; // Flight with /XX suffix
   continuationOf?: string; // Parent flight number if continuation
   departureCountry?: string; // Departure airport country code
@@ -45,7 +45,7 @@ export interface NonFlightDay {
   date: Date;
   month: number;
   year: number;
-  type: 'ME' | 'FL' | 'EM' | 'RE' | 'RB' | 'DP' | 'DT' | 'SI' | 'TK' | 'SB';
+  type: 'ME' | 'FL' | 'EM' | 'SEC' | 'RE' | 'RB' | 'DP' | 'DT' | 'SI' | 'TK' | 'SB';
   description: string;
   country?: string;
 }
@@ -66,7 +66,7 @@ export interface Settings {
   tipPerNight: number; // EUR
   countOnlyAFlag: boolean; // true = count both A and E flags (2 trips), false = only A flags (1 trip)
   countMedicalAsTrip: boolean; // ME days = round trip
-  countGroundDutyAsTrip: boolean; // EM, RE, DP, DT, SI, TK, SB = round trip
+  countGroundDutyAsTrip: boolean; // EM, SEC, RE, DP, DT, SI, TK, SB = round trip
   countForeignAsWorkDay: boolean; // FL days as work days
 }
 
