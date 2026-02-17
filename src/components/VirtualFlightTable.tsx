@@ -5,7 +5,8 @@ import { DUTY_CODES } from '../constants';
 import { DEFAULT_ALLOWANCE_YEAR } from '../utils/allowances';
 import { getCountryName } from '../utils/airports';
 import { getCountryAllowance } from '../utils/allowances';
-import { formatCurrency, formatDateStr, isSimulatorFlight, getBriefingTimeForRole } from '../utils/calculations';
+import { formatCurrency, formatDateStr, isSimulatorFlight, getBriefingTimeForRole, getSimulatorBriefingTimeMinutes } from '../utils/calculations';
+import { POST_BRIEFING_TIME_MINUTES } from '../constants';
 import { Clock } from 'lucide-react';
 
 interface VirtualFlightTableProps {
@@ -192,13 +193,24 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay, personalInfo 
   const dateStr = formatDateStr(flight.date);
   const dailyAllowance = dailyAllowances?.get(dateStr);
 
+  // Determine if this is a return/E-flag flight (de-briefing) vs departure/A-flag (pre-briefing)
+  const isReturnFlight = flight.dutyCode === 'E';
+
   // Calculate briefing time for this flight
-  const briefingMinutes = getBriefingTimeForRole(
-    personalInfo?.role,
-    personalInfo?.aircraftType,
-    flight.arrival,
-    flight
-  );
+  // E-flag (return) flights get post-briefing (de-briefing) time, not pre-briefing
+  const briefingMinutes = isReturnFlight
+    ? (isSimulator
+        ? getSimulatorBriefingTimeMinutes().postBriefing  // 60min for simulator
+        : POST_BRIEFING_TIME_MINUTES)                      // 30min for regular flights
+    : getBriefingTimeForRole(
+        personalInfo?.role,
+        personalInfo?.aircraftType,
+        flight.arrival,
+        flight
+      );
+
+  // Label: "De-Briefing" for return flights, "Briefing" for departures
+  const briefingLabel = isReturnFlight ? 'De-Briefing' : '';
 
   // Format briefing time (e.g., "1h 50min" or "60min")
   const formatBriefingTime = (minutes: number): string => {
@@ -214,9 +226,13 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay, personalInfo 
     }
   };
 
-  // Determine briefing badge color based on duration
+  // Determine briefing badge color based on type and duration
   const getBriefingColor = (minutes: number) => {
     if (minutes === 0) return '';
+    if (isReturnFlight) {
+      // De-briefing (post-flight) - distinct color
+      return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400';
+    }
     if (minutes >= 110) {
       // Longhaul
       return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400';
@@ -238,10 +254,10 @@ function FlightRowContent({ flight, dailyAllowances, isFirstOfDay, personalInfo 
         })}
       </td>
       <td className="py-2 px-2">
-        {isFirstOfDay && briefingMinutes > 0 ? (
+        {isFirstOfDay && briefingMinutes > 0 && !flight.isContinuation ? (
           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${getBriefingColor(briefingMinutes)}`}>
             <Clock className="w-3 h-3" />
-            {formatBriefingTime(briefingMinutes)}
+            {briefingLabel ? `${briefingLabel} ${formatBriefingTime(briefingMinutes)}` : formatBriefingTime(briefingMinutes)}
           </span>
         ) : null}
       </td>

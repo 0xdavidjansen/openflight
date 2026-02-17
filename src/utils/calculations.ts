@@ -1309,6 +1309,10 @@ export function calculateDailyAllowances(
         rateType = '24h';
       }
       
+      // For return days (E-flag), store post-briefing (de-briefing) time, not pre-briefing
+      const isReturnDay = isReturnToGermanyDay || isArrivalDayAfterOvernightReturn;
+      const dayBriefingMinutes = isReturnDay ? postBriefingMinutes : briefingMinutes;
+      
       dailyAllowances.set(dateStr, {
         country,
         flag,
@@ -1319,7 +1323,7 @@ export function calculateDailyAllowances(
         isFirstDay,
         isLastDay,
         hasFlights: hasAnyFlightActivity,
-        briefingMinutes,
+        briefingMinutes: dayBriefingMinutes,
         isLonghaul: isLonghaulDestination(firstFlight.arrival),
         hasAllowanceQualified: true // Abroad periods always qualify for allowances
       });
