@@ -28,6 +28,7 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
   GWT: 'DE', // Sylt
   BRE: 'DE', // Bremen
   IGS: 'DE', // Ingolstadt
+  HDF: 'DE', // Heringsdorf
 
   // Austria (AT)
   VIE: 'AT', // Vienna
@@ -72,6 +73,8 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
   LIL: 'FR', // Lille
   MPL: 'FR', // Montpellier
   BIQ: 'FR', // Biarritz
+  BIA: 'FR', // Bastia (Corsica)
+  FSC: 'FR', // Figari (Corsica)
 
   // Italy (IT)
   FCO: 'IT', // Rome Fiumicino
@@ -91,6 +94,9 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
   VRN: 'IT', // Verona
   GOA: 'IT', // Genoa
   BRI: 'IT', // Bari
+  AOI: 'IT', // Ancona
+  BDS: 'IT', // Brindisi
+  SUF: 'IT', // Lamezia Terme
 
   // Spain (ES)
   MAD: 'ES', // Madrid
@@ -109,6 +115,7 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
   IBZ: 'ES', // Ibiza
   MAH: 'ES', // Menorca
   SCQ: 'ES', // Santiago de Compostela
+  OVD: 'ES', // Asturias
 
   // Portugal (PT)
   LIS: 'PT', // Lisbon
@@ -161,6 +168,9 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
   TMP: 'FI', // Tampere
   TKU: 'FI', // Turku
   RVN: 'FI', // Rovaniemi
+  IVL: 'FI', // Ivalo
+  KTT: 'FI', // Kittilä
+  KAO: 'FI', // Kuusamo
 
   // Iceland (IS)
   KEF: 'IS', // Reykjavik Keflavik
@@ -173,6 +183,8 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
   WRO: 'PL', // Wroclaw
   POZ: 'PL', // Poznan
   KTW: 'PL', // Katowice
+  BZG: 'PL', // Bydgoszcz
+  RZE: 'PL', // Rzeszów
 
   // Czech Republic (CZ)
   PRG: 'CZ', // Prague
@@ -183,6 +195,7 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
 
   // Hungary (HU)
   BUD: 'HU', // Budapest
+  DEB: 'HU', // Debrecen
 
   // Estonia (EE)
   TLL: 'EE', // Tallinn
@@ -195,10 +208,13 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
 
   // Moldova (MD)
   KIV: 'MD', // Chisinau
+  RMO: 'MD', // Chisinau (new IATA code)
 
   // Romania (RO)
   OTP: 'RO', // Bucharest
   CLJ: 'RO', // Cluj-Napoca
+  OMR: 'RO', // Oradea
+  SBZ: 'RO', // Sibiu
 
   // Bulgaria (BG)
   SOF: 'BG', // Sofia
@@ -230,6 +246,8 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
   SPU: 'HR', // Split
   DBV: 'HR', // Dubrovnik
   PUY: 'HR', // Pula
+  RJK: 'HR', // Rijeka
+  ZAD: 'HR', // Zadar
 
   // Slovenia (SI)
   LJU: 'SI', // Ljubljana
@@ -305,13 +323,15 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
   DUR: 'ZA', // Durban
   LOS: 'NG', // Lagos
   ABV: 'NG', // Abuja
+  PHC: 'NG', // Port Harcourt
   ABJ: 'CI', // Abidjan
   ACC: 'GH', // Accra
   DAR: 'TZ', // Dar es Salaam
   MRU: 'MU', // Mauritius
   SEZ: 'SC', // Seychelles
   WDH: 'NA', // Windhoek
-  LAD: 'AO', // Luanda
+  LAD: 'AO', // Luanda (old airport)
+  NBJ: 'AO', // Luanda (new airport)
   SSG: 'GQ', // Malabo
 
   // Asia
@@ -383,6 +403,7 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
   CLT: 'US', // Charlotte
   STL: 'US', // St. Louis
   AUS: 'US', // Austin
+  RDU: 'US', // Raleigh/Durham
   YYZ: 'CA', // Toronto
   YVR: 'CA', // Vancouver
   YUL: 'CA', // Montreal
@@ -440,6 +461,9 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
   ADL: 'AU', // Adelaide
   OOL: 'AU', // Gold Coast
   CNS: 'AU', // Cairns
+
+  // Jersey (JE)
+  JER: 'JE', // Jersey
 };
 
 /**
@@ -448,16 +472,16 @@ export const AIRPORT_COUNTRIES: Record<string, string> = {
  */
 const AIRPORT_UTC_OFFSETS: Record<string, number> = {
   // Germany (UTC+1)
-  FRA: 1, MUC: 1, DUS: 1, TXL: 1, BER: 1, HAM: 1, CGN: 1, STR: 1, HAJ: 1, NUE: 1, LEJ: 1, DRS: 1, BRE: 1, DTM: 1, IGS: 1,
+  FRA: 1, MUC: 1, DUS: 1, TXL: 1, BER: 1, HAM: 1, CGN: 1, STR: 1, HAJ: 1, NUE: 1, LEJ: 1, DRS: 1, BRE: 1, DTM: 1, IGS: 1, HDF: 1,
   
   // Africa
-  NBO: 3, MBA: 3, JNB: 2, CPT: 2, CAI: 2, LOS: 1, ABV: 1, ADD: 3, CMN: 1, RAK: 1, TUN: 1, ALG: 1, DAR: 3, ACC: 0, MRU: 4, SEZ: 4, WDH: 2, LAD: 1, SSG: 1,
+  NBO: 3, MBA: 3, JNB: 2, CPT: 2, CAI: 2, LOS: 1, ABV: 1, PHC: 1, ADD: 3, CMN: 1, RAK: 1, TUN: 1, ALG: 1, DAR: 3, ACC: 0, MRU: 4, SEZ: 4, WDH: 2, LAD: 1, NBJ: 1, SSG: 1,
   
   // Middle East
   DXB: 4, AUH: 4, DOH: 3, RUH: 3, JED: 3, DMM: 3, TLV: 2, AMM: 2, KWI: 3, BAH: 3, MCT: 4, BGW: 3, EBL: 3, IKA: 3.5, BEY: 2,
   
   // North America
-  JFK: -5, EWR: -5, LAX: -8, ORD: -6, SFO: -8, MIA: -5, DFW: -6, IAH: -6, BOS: -5, ATL: -5, SEA: -8, DEN: -7, PHX: -7, IAD: -5, DCA: -5, PHL: -5, DTW: -5, MSP: -6, CLT: -5, SAN: -8, LAS: -8, STL: -6, AUS: -6,
+  JFK: -5, EWR: -5, LAX: -8, ORD: -6, SFO: -8, MIA: -5, DFW: -6, IAH: -6, BOS: -5, ATL: -5, SEA: -8, DEN: -7, PHX: -7, IAD: -5, DCA: -5, PHL: -5, DTW: -5, MSP: -6, CLT: -5, SAN: -8, LAS: -8, STL: -6, AUS: -6, RDU: -5,
   YYZ: -5, YVR: -8, YUL: -5, YYC: -7, YOW: -5,
   MEX: -6, CUN: -5,
   
@@ -473,17 +497,18 @@ const AIRPORT_UTC_OFFSETS: Record<string, number> = {
   
   // Europe
   LHR: 0, LGW: 0, STN: 0, LCY: 0, MAN: 0, EDI: 0, BHX: 0,
-  CDG: 1, ORY: 1, NCE: 1, LYS: 1, MRS: 1, TLS: 1,
+  CDG: 1, ORY: 1, NCE: 1, LYS: 1, MRS: 1, TLS: 1, BIA: 1, FSC: 1, BIQ: 1, BOD: 1, NTE: 1, SXB: 1,
   AMS: 1, BRU: 1, ZRH: 1, GVA: 1, BSL: 1, VIE: 1, SZG: 1, INN: 1,
-  MAD: 1, BCN: 1, PMI: 1, AGP: 1, VLC: 1, ALC: 1, TFS: 0, LPA: 0,
-  FCO: 1, MXP: 1, VCE: 1, NAP: 1, FLR: 1,
+  MAD: 1, BCN: 1, PMI: 1, AGP: 1, VLC: 1, ALC: 1, OVD: 1, BIO: 1, SVQ: 1, SCQ: 1, IBZ: 1, TFS: 0, LPA: 0,
+  FCO: 1, MXP: 1, VCE: 1, NAP: 1, FLR: 1, AOI: 1, BDS: 1, SUF: 1, BRI: 1, GOA: 1, TRN: 1, CTA: 1, PMO: 1, CAG: 1, OLB: 1, BLQ: 1,
   LIS: 0, OPO: 0, FAO: 0,
-  CPH: 1, OSL: 1, BGO: 1, ARN: 1, GOT: 1, HEL: 2, DUB: 0,
+  CPH: 1, BLL: 1, OSL: 1, BGO: 1, SVG: 1, TOS: 1, TRD: 1, ARN: 1, GOT: 1, HEL: 2, IVL: 2, KTT: 2, KAO: 2, RVN: 2, DUB: 0, ORK: 0, JER: 0,
   ATH: 2, SKG: 2, HER: 2, RHO: 2,
   IST: 3, SAW: 3, AYT: 3, ADB: 3, ESB: 3,
-  WAW: 1, KRK: 1, GDN: 1, PRG: 1, BUD: 1, OTP: 2, SOF: 2, BEG: 1,
-  ZAG: 1, SPU: 1, DBV: 1, LJU: 1, BTS: 1,
-  RIX: 2, VNO: 2, TLL: 2, KIV: 2, KBP: 2, LWO: 2,
+  WAW: 1, KRK: 1, GDN: 1, BZG: 1, RZE: 1, WRO: 1, POZ: 1, PRG: 1, BUD: 1, DEB: 1, OTP: 2, CLJ: 2, OMR: 2, SBZ: 2, SOF: 2, BEG: 1,
+  ZAG: 1, SPU: 1, DBV: 1, PUY: 1, RJK: 1, ZAD: 1, LJU: 1, BTS: 1,
+  RIX: 2, VNO: 2, TLL: 2, KIV: 2, RMO: 2, KBP: 2, LWO: 2,
+  LCA: 2, PFO: 2, MLA: 1, TIA: 1, SKP: 1, SJJ: 1, TIV: 1, NCL: 0, GLA: 0,
   TBS: 4, EVN: 4, GYD: 4,
   SVO: 3, DME: 3, LED: 3,
   
@@ -626,6 +651,17 @@ export function getCountryName(countryCode: string): string {
     AR: 'Argentinien',
     AU: 'Australien',
     NZ: 'Neuseeland',
+    JE: 'Jersey',
+    PR: 'Puerto Rico',
+    UY: 'Uruguay',
+    VE: 'Venezuela',
+    EC: 'Ecuador',
+    BO: 'Bolivien',
+    PY: 'Paraguay',
+    JM: 'Jamaika',
+    BB: 'Barbados',
+    FJ: 'Fidschi',
+    PF: 'Französisch-Polynesien',
   };
   return names[countryCode.toUpperCase()] || countryCode;
 }
