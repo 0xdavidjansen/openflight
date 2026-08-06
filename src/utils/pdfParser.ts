@@ -25,12 +25,26 @@ function parseAndValidateDate(year: number, month: number, day: number): Date | 
   return date;
 }
 
+// German month names (lowercase) used for text-based fallback parsing
+const GERMAN_MONTH_NAMES = [
+  'januar', 'februar', 'märz', 'april', 'mai', 'juni',
+  'juli', 'august', 'september', 'oktober', 'november', 'dezember',
+];
+
+function isValidYearRange(year: number): boolean {
+  return year >= 2020 && year <= 2030;
+}
+
+function isValidMonth(month: number): boolean {
+  return month >= 1 && month <= 12;
+}
+
 function parseMonthYearFromFilename(fileName: string): { year: number; month: number } | null {
   const yearFirstMatch = fileName.match(/(\d{4})[_-](\d{1,2})/);
   if (yearFirstMatch) {
     const year = parseInt(yearFirstMatch[1], 10);
     const month = parseInt(yearFirstMatch[2], 10);
-    if (year >= 2020 && year <= 2030 && month >= 1 && month <= 12) {
+    if (isValidYearRange(year) && isValidMonth(month)) {
       return { year, month };
     }
   }
@@ -39,8 +53,114 @@ function parseMonthYearFromFilename(fileName: string): { year: number; month: nu
   if (monthFirstMatch) {
     const month = parseInt(monthFirstMatch[1], 10);
     const year = parseInt(monthFirstMatch[2], 10);
-    if (year >= 2020 && year <= 2030 && month >= 1 && month <= 12) {
+    if (isValidYearRange(year) && isValidMonth(month)) {
       return { year, month };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parse month and year from a document using multiple strategies in order of reliability.
+ *
+ * This is shared between Flugstundenübersicht and Streckeneinsatzabrechnung parsing
+ * because both documents share the same Lufthansa layout conventions but differ in
+ * how the "Monat" header is positioned. Critically, this function avoids picking up
+ * the "Erstellt am DD.MM.YYYY" creation date as the document year, which previously
+ * caused reimbursements for older months to be misassigned to the current year.
+ *
+ * Strategies (in order):
+ *  1. Filename pattern: YYYY-MM or MM-YYYY with `_-/` separator
+ *  2. "Monat XX / YYYY" anywhere in the document text
+ *  3. Other German headers: "Abrechnungsmonat", "für Monat", "Streckeneinsatz-Abrechnung MM/YYYY"
+ *  4. "MonthName YYYY" pattern (e.g., "August 2025", "August/2025") — this binds the
+ *     month name to a specific year and is highly reliable
+ *  5. Last-resort fallback: Month name + first plausible year that is NOT part of an
+ *     "Erstellt am" creation-date stamp
+ */
+export function parseMonthYearFromDocument(
+  fileName: string,
+  fullText: string
+): { year: number; month: number } | null {
+  // Strategy 1: Filename
+  const filenameDate = parseMonthYearFromFilename(fileName);
+  if (filenameDate) {
+    return filenameDate;
+  }
+
+  // Strategy 2: "Monat XX / YYYY" anywhere in the document.
+  // Search the full text, not just the first 500 chars: in the Streckeneinsatz-
+  // Abrechnung the Monat header can appear after a long personal-info block.
+  const monatPattern = /Monat\s*:?\s*(\d{1,2})\s*[/\-._]\s*(\d{4})/i;
+  const monatMatch = fullText.match(monatPattern);
+  if (monatMatch) {
+    const month = parseInt(monatMatch[1], 10);
+    const year = parseInt(monatMatch[2], 10);
+    if (isValidYearRange(year) && isValidMonth(month)) {
+      return { year, month };
+    }
+  }
+
+  // Strategy 3: Other document-specific German headers
+  const altPatterns = [
+    /Abrechnungsmonat\s*:?\s*(\d{1,2})\s*[/\-._]\s*(\d{4})/i,
+    /für\s+Monat\s*:?\s*(\d{1,2})\s*[/\-._]\s*(\d{4})/i,
+    /Streckeneinsatz-?Abrechnung\s*:?\s*(\d{1,2})\s*[/\-._]\s*(\d{4})/i,
+    /Flugstunden-?Übersicht\s*:?\s*(\d{1,2})\s*[/\-._]\s*(\d{4})/i,
+  ];
+  for (const pattern of altPatterns) {
+    const match = fullText.match(pattern);
+    if (match) {
+      const month = parseInt(match[1], 10);
+      const year = parseInt(match[2], 10);
+      if (isValidYearRange(year) && isValidMonth(month)) {
+        return { year, month };
+      }
+    }
+  }
+
+  // Strategy 4: "MonthName YYYY" — binds the month name to a specific year, e.g.
+  // "August 2025" or "August/2025". This avoids the year-confusion bug where
+  // the creation date's year would be picked up.
+  for (let i = 0; i < GERMAN_MONTH_NAMES.length; i++) {
+    const pattern = new RegExp(
+      `\\b${GERMAN_MONTH_NAMES[i]}\\s*[/\\-._]?\\s*(\\d{4})\\b`,
+      'i'
+    );
+    const match = fullText.match(pattern);
+    if (match) {
+      const year = parseInt(match[1], 10);
+      if (isValidYearRange(year)) {
+        return { year, month: i + 1 };
+      }
+    }
+  }
+
+  // Strategy 5: Last-resort fallback — month name only, then look for a year that
+  // is NOT part of the "Erstellt am" creation-date stamp.
+  let fallbackMonth: number | null = null;
+  const lowerText = fullText.toLowerCase();
+  for (let i = 0; i < GERMAN_MONTH_NAMES.length; i++) {
+    if (new RegExp(`\\b${GERMAN_MONTH_NAMES[i]}\\b`, 'i').test(lowerText)) {
+      fallbackMonth = i + 1;
+      break;
+    }
+  }
+
+  if (fallbackMonth !== null) {
+    // Strip "Erstellt am DD.MM.YYYY" (and similar date stamps) before year detection
+    // so a document created in 2026 about August 2025 is not misfiled as 08/2026.
+    const textWithoutCreatedDate = fullText
+      .replace(/Erstellt\s+am[:\s]*\d{1,2}\.\d{1,2}\.\d{4}/gi, '')
+      .replace(/erstellt\s+am[:\s]*\d{1,2}\.\d{1,2}\.\d{4}/gi, '');
+    const yearPattern = /\b(20[2-3]\d)\b/;
+    const yearMatch = textWithoutCreatedDate.match(yearPattern);
+    if (yearMatch) {
+      const year = parseInt(yearMatch[1], 10);
+      if (isValidYearRange(year)) {
+        return { year, month: fallbackMonth };
+      }
     }
   }
 
@@ -120,47 +240,11 @@ export async function parseFlugstundenPDF(file: File): Promise<{
   let year = new Date().getFullYear();
   let month = 1;
 
-  const filenameDate = parseMonthYearFromFilename(fileName);
-  if (filenameDate) {
-    year = filenameDate.year;
-    month = filenameDate.month;
+  const parsedDate = parseMonthYearFromDocument(fileName, fullText);
+  if (parsedDate) {
+    year = parsedDate.year;
+    month = parsedDate.month;
   } else {
-    // Try to find month/year in document header/title area (first 500 chars)
-    const headerText = fullText.slice(0, 500);
-
-    // First try to find "Monat XX / YYYY" pattern (numeric month/year format)
-    const monatPattern = /Monat\s*(\d{1,2})\s*\/\s*(\d{4})/i;
-    const monatMatch = headerText.match(monatPattern);
-    if (monatMatch) {
-      const extractedMonth = parseInt(monatMatch[1], 10);
-      const extractedYear = parseInt(monatMatch[2], 10);
-      if (extractedMonth >= 1 && extractedMonth <= 12) {
-        month = extractedMonth;
-      }
-      if (extractedYear >= 2020 && extractedYear <= 2030) {
-        year = extractedYear;
-      }
-    } else {
-      // Fall back to German month names
-      const monthNames = ['januar', 'februar', 'märz', 'april', 'mai', 'juni',
-        'juli', 'august', 'september', 'oktober', 'november', 'dezember'];
-
-      for (let i = 0; i < monthNames.length; i++) {
-        const pattern = new RegExp(`\\b${monthNames[i]}\\b`, 'i');
-        if (pattern.test(headerText)) {
-          month = i + 1;
-          break;
-        }
-      }
-
-      // Try to find a reasonable year (2020-2030) in the header
-      const yearPattern = /\b(20[2-3]\d)\b/;
-      const yearMatch = headerText.match(yearPattern);
-      if (yearMatch) {
-        year = parseInt(yearMatch[1], 10);
-      }
-    }
-
     // If still not found, try to extract from first flight date (DD.MM. format)
     if (month === 1) {
       // Look for flight dates in format "DD.MM." at the start of lines
@@ -400,6 +484,47 @@ export async function parseFlugstundenPDF(file: File): Promise<{
 }
 
 /**
+ * Parse reimbursement from individual expense rows in a Streckeneinsatzabrechnung.
+ *
+ * This is the primary (most reliable) strategy for extracting the tax-free amount.
+ * Instead of guessing the Summe line column layout (which varies between documents),
+ * it sums up Spesenanspruch (total expense) from dated rows and subtracts the
+ * total Steuer (taxable portion) found in 3-number sequences (stfrei, Steuer, Werbko).
+ *
+ * @returns tax-free reimbursement amount, or null if no expense rows were found
+ */
+export function parseReimbursementFromRows(
+  fullText: string,
+  parseNumber: (str: string) => number
+): number | null {
+  // Only search the data region (before the Summe line) to avoid capturing totals
+  const summeIdx = fullText.search(/Summe/i);
+  const dataRegion = summeIdx > 0 ? fullText.substring(0, summeIdx) : fullText;
+
+  // Extract Spesenanspruch amounts from dated rows
+  // Pattern: DD.MM.YYYY HH:MM [HH:MM] amount Ort ...
+  const spesenanspruchPattern = /\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}\s+(?:\d{2}:\d{2}\s+)?(\d+(?:[.,]\d+)?)/g;
+  const spesenanspruchValues = [...dataRegion.matchAll(spesenanspruchPattern)]
+    .map((m) => parseNumber(m[1]));
+  const totalSpesenanspruch = spesenanspruchValues.reduce((sum, v) => sum + v, 0);
+
+  // Extract Steuer (taxable portion) from 3-number sequences (stfrei, Steuer, Werbko)
+  // These appear inline in data rows and as per-location subtotals
+  const threeNumPattern = /(\d+[.,]\d{2})\s+(\d+[.,]\d{2})\s+(\d+[.,]\d{2})/g;
+  const steuerValues = [...dataRegion.matchAll(threeNumPattern)]
+    .map((m) => parseNumber(m[2])); // Middle value is Steuer
+  const totalSteuer = steuerValues.reduce((sum, v) => sum + v, 0);
+
+  if (totalSpesenanspruch > 0) {
+    const taxFree = Math.max(0, totalSpesenanspruch - totalSteuer);
+    console.log(`[PDF Parser] Row-level parsing: ${spesenanspruchValues.length} rows, Spesenanspruch=${totalSpesenanspruch}€, Steuer=${totalSteuer}€, TaxFree=${taxFree}€`);
+    return taxFree;
+  }
+
+  return null;
+}
+
+/**
  * Parse Streckeneinsatzabrechnung PDF
  * This document contains reimbursement/allowance data
  */
@@ -421,56 +546,20 @@ export async function parseStreckeneinsatzPDF(file: File): Promise<{
   let year = new Date().getFullYear();
   let month = 1;
 
-  const filenameDate = parseMonthYearFromFilename(fileName);
-  if (filenameDate) {
-    year = filenameDate.year;
-    month = filenameDate.month;
-  } else {
-    // Fall back to searching in document text
-    const headerText = fullText.slice(0, 500);
-
-    // Try to find "Monat XX / YYYY" pattern
-    const monatPattern = /Monat\s*(\d{1,2})\s*\/\s*(\d{4})/i;
-    const monatMatch = headerText.match(monatPattern);
-    if (monatMatch) {
-      const extractedMonth = parseInt(monatMatch[1], 10);
-      const extractedYear = parseInt(monatMatch[2], 10);
-      if (extractedMonth >= 1 && extractedMonth <= 12) {
-        month = extractedMonth;
-      }
-      if (extractedYear >= 2020 && extractedYear <= 2030) {
-        year = extractedYear;
-      }
-    } else {
-      // Fall back to German month names
-      const monthNames = ['januar', 'februar', 'märz', 'april', 'mai', 'juni',
-        'juli', 'august', 'september', 'oktober', 'november', 'dezember'];
-
-      for (let i = 0; i < monthNames.length; i++) {
-        if (fullText.toLowerCase().includes(monthNames[i])) {
-          month = i + 1;
-          break;
-        }
-      }
-
-      // Try to find a reasonable year (2020-2030) in the header
-      const yearPattern = /\b(20[2-3]\d)\b/;
-      const yearMatch = headerText.match(yearPattern);
-      if (yearMatch) {
-        year = parseInt(yearMatch[1], 10);
-      }
-    }
+  const parsedDate = parseMonthYearFromDocument(fileName, fullText);
+  if (parsedDate) {
+    year = parsedDate.year;
+    month = parsedDate.month;
   }
 
   
-  // Extract tax-free reimbursement amount from the \"Summe\" line
-  // The Streckeneinsatzabrechnung has a \"Summe\" line at the bottom with columns:
-  // Format with 3 columns: Summe: [Total] [Werbko] [Steuer]
-  // Format with 2 columns: Summe: [Total] [Steuer]
-  // Tax-free amount = Total - Werbko - Steuer
-  
+  // Extract tax-free reimbursement amount
+  // Strategy 1 (primary): Parse individual expense rows for Spesenanspruch and Steuer
+  // Strategy 2 (fallback): Parse the Summe line at the bottom of the document
+
   let taxFreeReimbursement = 0;
-  
+  let rowLevelParsed = false;
+
   // Parse numbers, handling German format (comma as decimal separator, dot as thousands separator)
   const parseGermanNumber = (str: string): number => {
     if (!str) return 0;
@@ -478,7 +567,25 @@ export async function parseStreckeneinsatzPDF(file: File): Promise<{
     const normalized = str.replace(/\./g, '').replace(',', '.');
     return parseFloat(normalized);
   };
+
+  // === Strategy 1: Row-level parsing (primary, most reliable) ===
+  // The document header columns are:
+  //   Datum Ab An Spesenanspruch - Ort Zwölftel stfrei - Ort Steuer Werbko Dopp Storno
+  // Each dated row has a Spesenanspruch (total expense) amount.
+  // Steuer (taxable portion) appears in 3-number sequences (stfrei, Steuer, Werbko)
+  // either inline in data rows or as per-location subtotals.
+  // taxFree = totalSpesenanspruch - totalSteuer
+  {
+    const rowResult = parseReimbursementFromRows(fullText, parseGermanNumber);
+    if (rowResult !== null) {
+      taxFreeReimbursement = rowResult;
+      rowLevelParsed = true;
+    }
+  }
+
+  // === Strategy 2: Summe line parsing (fallback) ===
   
+  if (!rowLevelParsed) {
   // Try multiple regex patterns to handle different PDF text extraction formats
   // Each pattern tries to match: Summe/Gesamt + 2 or 3 numbers
   const patterns = [
@@ -538,10 +645,17 @@ export async function parseStreckeneinsatzPDF(file: File): Promise<{
       docWerbko = value2;
       docSteuer = value3;
     } else {
-      // 2 columns: Total, Steuer
+      // 2 columns — ambiguous: could be [Total, Steuer] or [Total, stfrei]
+      // When both values are equal, Steuer must be 0 (since Total = stfrei + Steuer),
+      // so the second column is stfrei (tax-free), not Steuer (taxable).
       docTotal = value1;
       docWerbko = 0;
-      docSteuer = value2;
+      if (value1 === value2) {
+        // Both values equal → everything is tax-free (Steuer = 0)
+        docSteuer = 0;
+      } else {
+        docSteuer = value2;
+      }
     }
     
     // Tax-free = Total - Werbko - Steuer
@@ -619,6 +733,7 @@ export async function parseStreckeneinsatzPDF(file: File): Promise<{
       });
     }
   }
+  } // end if (!rowLevelParsed)
   
   // Note: Day counts are now calculated automatically from flight data
   // Legacy PDF parsing for day counts is no longer supported
