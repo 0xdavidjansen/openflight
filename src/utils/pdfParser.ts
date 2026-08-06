@@ -599,6 +599,86 @@ export function parseReimbursementFromRows(
 }
 
 /**
+ * Parse the tax-free reimbursement from the "Summe:" line at the bottom of a
+ * Streckeneinsatzabrechnung. This is the authoritative, primary strategy: it
+ * reads Lufthansa's own printed total rather than reconstructing it from rows.
+ *
+ * The Summe line has 2 or 3 numeric columns:
+ *  - 3 columns: Summe: [Total] [Werbko] [Steuer]   →  taxFree = Total - Werbko - Steuer
+ *  - 2 columns: Summe: [Total] [stfrei|Steuer]
+ *      When the two values are equal, Steuer must be 0 (Total = stfrei + Steuer),
+ *      so the second column is stfrei (tax-free) and taxFree = Total.
+ *      Otherwise the second column is Steuer and taxFree = Total - Steuer.
+ *
+ * Also handles the legacy "WerbkoNN,NN" suffix some 2023 PDFs append after the
+ * legend with no separating space.
+ *
+ * @returns tax-free reimbursement amount, or null if no Summe line was found
+ */
+export function parseReimbursementFromSummeLine(
+  fullText: string,
+  fullTextWithSpaces: string,
+  parseNumber: (str: string) => number
+): number | null {
+  const patterns = [
+    /Summe:\s*([\d.,]+)\s+([\d.,]+)(?:\s+([\d.,]+))?/i,
+    /Summe\s+([\d.,]+)\s+([\d.,]+)(?:\s+([\d.,]+))?/i,
+    /Gesamt:?\s*([\d.,]+)\s+([\d.,]+)(?:\s+([\d.,]+))?/i,
+    /(?:Summe|Gesamt):?\s*([\d.,]+)[^\d]+([\d.,]+)(?:[^\d]+([\d.,]+))?/i,
+    /(?:Summe|Gesamt):?\s*([\d.,]+)\s*[\n\r]+\s*([\d.,]+)(?:\s*[\n\r]+\s*([\d.,]+))?/i,
+    /(?:Summe|Gesamt|Total)[:\s]+([\d.,]+)[\s\S]{0,50}?([\d.,]+)(?:[\s\S]{0,50}?([\d.,]+))?/i,
+  ];
+
+  let summeMatch: RegExpMatchArray | null = null;
+  for (let i = 0; i < patterns.length; i++) {
+    summeMatch = fullText.match(patterns[i]) || fullTextWithSpaces.match(patterns[i]);
+    if (summeMatch) break;
+  }
+
+  if (!summeMatch) {
+    return null;
+  }
+
+  const value1 = parseNumber(summeMatch[1]);
+  const value2 = parseNumber(summeMatch[2]);
+  const value3 = summeMatch[3] ? parseNumber(summeMatch[3]) : null;
+
+  let docTotal: number;
+  let docWerbko: number;
+  let docSteuer: number;
+
+  if (value3 !== null) {
+    docTotal = value1;
+    docWerbko = value2;
+    docSteuer = value3;
+  } else {
+    docTotal = value1;
+    docWerbko = 0;
+    if (value1 === value2) {
+      docSteuer = 0;
+    } else {
+      docSteuer = value2;
+    }
+  }
+
+  let taxFreeReimbursement = docTotal - docWerbko - docSteuer;
+
+  // Legacy: some 2023 PDFs append "WerbkoNN,NN" after the legend with no space.
+  if (docWerbko === 0) {
+    const endWerbkoMatch = fullText.match(/Werbko\s*(\d+[.,]?\d*)/i)
+      || fullTextWithSpaces.match(/Werbko\s*(\d+[.,]?\d*)/i);
+    if (endWerbkoMatch) {
+      const endWerbko = parseNumber(endWerbkoMatch[1]);
+      if (endWerbko > 0) {
+        taxFreeReimbursement = docTotal - endWerbko - docSteuer;
+      }
+    }
+  }
+
+  return taxFreeReimbursement;
+}
+
+/**
  * Parse Streckeneinsatzabrechnung PDF
  * This document contains reimbursement/allowance data
  */
@@ -633,12 +713,16 @@ export async function parseStreckeneinsatzPDF(file: File): Promise<{
     }
   }
 
-  // Extract tax-free reimbursement amount
-  // Strategy 1 (primary): Parse individual expense rows for Spesenanspruch and Steuer
-  // Strategy 2 (fallback): Parse the Summe line at the bottom of the document
+  // Extract tax-free reimbursement amount.
+  // Primary strategy: parse the "Summe:" line at the bottom of the document.
+  // The Summe line is Lufthansa's authoritative printed total and is always present.
+  // It correctly accounts for continuation rows (no departure time) and per-location
+  // subtotals that row-level regex parsing cannot reliably reconstruct — which is why
+  // the previous row-level "Strategy 1" approach undercounted Spesenanspruch on most
+  // months and reported 0,00€. parseReimbursementFromRows is kept exported for
+  // backwards compatibility but is no longer called here.
 
   let taxFreeReimbursement = 0;
-  let rowLevelParsed = false;
 
   // Parse numbers, handling German format (comma as decimal separator, dot as thousands separator)
   const parseGermanNumber = (str: string): number => {
@@ -648,173 +732,21 @@ export async function parseStreckeneinsatzPDF(file: File): Promise<{
     return parseFloat(normalized);
   };
 
-  // === Strategy 1: Row-level parsing (primary, most reliable) ===
-  // The document header columns are:
-  //   Datum Ab An Spesenanspruch - Ort Zwölftel stfrei - Ort Steuer Werbko Dopp Storno
-  // Each dated row has a Spesenanspruch (total expense) amount.
-  // Steuer (taxable portion) appears in 3-number sequences (stfrei, Steuer, Werbko)
-  // either inline in data rows or as per-location subtotals.
-  // taxFree = totalSpesenanspruch - totalSteuer
-  {
-    const rowResult = parseReimbursementFromRows(fullText, parseGermanNumber);
-    if (rowResult !== null) {
-      taxFreeReimbursement = rowResult;
-      rowLevelParsed = true;
-    }
-  }
-
-  // === Strategy 2: Summe line parsing (fallback) ===
-  
-  if (!rowLevelParsed) {
-  // Try multiple regex patterns to handle different PDF text extraction formats
-  // Each pattern tries to match: Summe/Gesamt + 2 or 3 numbers
-  const patterns = [
-    // Pattern 1: Standard format with colon and spaces: "Summe: 475,20 91,20"
-    /Summe:\s*([\d.,]+)\s+([\d.,]+)(?:\s+([\d.,]+))?/i,
-    
-    // Pattern 2: Without colon: "Summe 475,20 91,20"
-    /Summe\s+([\d.,]+)\s+([\d.,]+)(?:\s+([\d.,]+))?/i,
-    
-    // Pattern 3: Using "Gesamt" instead: "Gesamt: 475,20 91,20"
-    /Gesamt:?\s*([\d.,]+)\s+([\d.,]+)(?:\s+([\d.,]+))?/i,
-    
-    // Pattern 4: More flexible spacing (handles extra whitespace or tabs)
-    /(?:Summe|Gesamt):?\s*([\d.,]+)[^\d]+([\d.,]+)(?:[^\d]+([\d.,]+))?/i,
-    
-    // Pattern 5: Numbers might be on separate lines
-    /(?:Summe|Gesamt):?\s*([\d.,]+)\s*[\n\r]+\s*([\d.,]+)(?:\s*[\n\r]+\s*([\d.,]+))?/i,
-    
-    // Pattern 6: Very flexible - just look for the word and numbers after it
-    /(?:Summe|Gesamt|Total)[:\s]+([\d.,]+)[\s\S]{0,50}?([\d.,]+)(?:[\s\S]{0,50}?([\d.,]+))?/i,
-  ];
-  
-  let summeMatch: RegExpMatchArray | null = null;
-  let matchedPattern = -1;
-  
-  // Try each pattern on both text versions (with newlines and with spaces)
-  for (let i = 0; i < patterns.length; i++) {
-    // First try on normal text
-    summeMatch = fullText.match(patterns[i]);
-    if (summeMatch) {
-      matchedPattern = i + 1;
-      console.log(`[PDF Parser] Summe line matched with pattern ${matchedPattern} (newline-separated)`);
-      break;
-    }
-    
-    // If no match, try on text with spaces
-    summeMatch = fullTextWithSpaces.match(patterns[i]);
-    if (summeMatch) {
-      matchedPattern = i + 1;
-      console.log(`[PDF Parser] Summe line matched with pattern ${matchedPattern} (space-separated)`);
-      break;
-    }
-  }
-  
-  if (summeMatch) {
-    const value1 = parseGermanNumber(summeMatch[1]);
-    const value2 = parseGermanNumber(summeMatch[2]);
-    const value3 = summeMatch[3] ? parseGermanNumber(summeMatch[3]) : null;
-    
-    let docTotal: number;
-    let docWerbko: number;
-    let docSteuer: number;
-    
-    if (value3 !== null) {
-      // 3 columns: Total, Werbko, Steuer
-      docTotal = value1;
-      docWerbko = value2;
-      docSteuer = value3;
-    } else {
-      // 2 columns — ambiguous: could be [Total, Steuer] or [Total, stfrei]
-      // When both values are equal, Steuer must be 0 (since Total = stfrei + Steuer),
-      // so the second column is stfrei (tax-free), not Steuer (taxable).
-      docTotal = value1;
-      docWerbko = 0;
-      if (value1 === value2) {
-        // Both values equal → everything is tax-free (Steuer = 0)
-        docSteuer = 0;
-      } else {
-        docSteuer = value2;
-      }
-    }
-    
-    // Tax-free = Total - Werbko - Steuer
-    taxFreeReimbursement = docTotal - docWerbko - docSteuer;
-    
-    // CRITICAL FIX: Some PDFs (e.g., June & November 2023) have Werbko as a separate value
-    // at the END of the document, formatted as "Werbko10,60" with no space after the legend.
-    // If the Summe line didn't capture Werbko (docWerbko === 0), search for it separately.
-    if (docWerbko === 0) {
-      // Pattern to match "Werbko" followed immediately by a number (German format)
-      // E.g., "Werbko10,60" or "Werbko13,80"
-      const endWerbkoPattern = /Werbko\s*(\d+[.,]?\d*)/i;
-      const endWerbkoMatch = fullText.match(endWerbkoPattern) || fullTextWithSpaces.match(endWerbkoPattern);
-      
-      if (endWerbkoMatch) {
-        const endWerbko = parseGermanNumber(endWerbkoMatch[1]);
-        if (endWerbko > 0) {
-          console.log(`[PDF Parser] Found standalone Werbko at end of document: ${endWerbko}€`);
-          docWerbko = endWerbko;
-          // Recalculate tax-free with the found Werbko
-          taxFreeReimbursement = docTotal - docWerbko - docSteuer;
-        }
-      }
-    }
-    
-    console.log(`[PDF Parser] Streckeneinsatzabrechnung parsed successfully: Total=${docTotal}€, Werbko=${docWerbko}€, Steuer=${docSteuer}€, TaxFree=${taxFreeReimbursement}€`);
+  const summeResult = parseReimbursementFromSummeLine(fullText, fullTextWithSpaces, parseGermanNumber);
+  if (summeResult !== null) {
+    taxFreeReimbursement = summeResult;
+    console.log(`[PDF Parser] Streckeneinsatzabrechnung parsed successfully: TaxFree=${taxFreeReimbursement}€`);
   } else {
     // Enhanced debugging when parsing fails
     console.warn('[PDF Parser] ❌ Could not find Summe line in Streckeneinsatzabrechnung');
     console.warn('[PDF Parser] Filename:', fileName);
     console.warn('[PDF Parser] Document length:', fullText.length, 'chars');
-    
-    // Log last 800 chars to see the end of document where Summe should be
     console.warn('[PDF Parser] === Last 800 chars of document (newline-separated) ===');
     console.warn(fullText.slice(-800));
-    
     console.warn('[PDF Parser] === Last 800 chars of document (space-separated) ===');
     console.warn(fullTextWithSpaces.slice(-800));
-    
-    // Find all lines with numbers that might be the Summe line
-    const linesWithNumbers = fullText
-      .split(/[\n\r]+/)
-      .map((line, idx) => ({ line, idx }))
-      .filter(({ line }) => /[\d.,]+/.test(line))
-      .slice(-15); // Last 15 lines with numbers
-    
-    console.warn('[PDF Parser] === Last 15 lines containing numbers ===');
-    linesWithNumbers.forEach(({ line, idx }) => {
-      console.warn(`  Line ${idx}: ${line.substring(0, 150)}`);
-    });
-    
-    // Try to find any occurrence of Summe/Gesamt/Total
-    const summeOccurrences = [...fullText.matchAll(/(?:Summe|Gesamt|Total)/gi)];
-    if (summeOccurrences.length > 0) {
-      console.warn(`[PDF Parser] === Found ${summeOccurrences.length} occurrence(s) of Summe/Gesamt/Total ===`);
-      summeOccurrences.forEach((match, idx) => {
-        const start = Math.max(0, match.index! - 50);
-        const end = Math.min(fullText.length, match.index! + 200);
-        console.warn(`  Occurrence ${idx + 1} at index ${match.index}:`);
-        console.warn(`    ${fullText.substring(start, end)}`);
-      });
-    } else {
-      console.warn('[PDF Parser] ⚠️  No occurrences of "Summe", "Gesamt", or "Total" found in document!');
-    }
-    
-    // Also check space-separated version
-    const summeOccurrencesWithSpaces = [...fullTextWithSpaces.matchAll(/(?:Summe|Gesamt|Total)/gi)];
-    if (summeOccurrencesWithSpaces.length > 0) {
-      console.warn(`[PDF Parser] === Found ${summeOccurrencesWithSpaces.length} occurrence(s) in space-separated text ===`);
-      summeOccurrencesWithSpaces.slice(0, 3).forEach((match, idx) => {
-        const start = Math.max(0, match.index! - 50);
-        const end = Math.min(fullTextWithSpaces.length, match.index! + 200);
-        console.warn(`  Occurrence ${idx + 1} at index ${match.index}:`);
-        console.warn(`    ${fullTextWithSpaces.substring(start, end)}`);
-      });
-    }
   }
-  } // end if (!rowLevelParsed)
-  
+
   // Note: Day counts are now calculated automatically from flight data
   // Legacy PDF parsing for day counts is no longer supported
   const countryDays: { country: string; days8h: number; days24h: number; rate8h: number; rate24h: number }[] = [];

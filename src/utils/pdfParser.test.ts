@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { parseMonthYearFromDocument, parseReimbursementFromRows, parseMonthYearFromRowDates } from './pdfParser'
+import { parseMonthYearFromDocument, parseReimbursementFromRows, parseReimbursementFromSummeLine, parseMonthYearFromRowDates } from './pdfParser'
+import { REAL_PDF_FIXTURES } from './streckenFixtures'
 
 const parseGermanNumber = (str: string): number => {
   if (!str) return 0
@@ -308,4 +309,58 @@ describe('parseMonthYearFromRowDates', () => {
     const text = '30.07.2025 data\n31.07.2025 data\n01.08.2025 data'
     expect(parseMonthYearFromRowDates(text)).toEqual({ year: 2025, month: 7 })
   })
+})
+
+describe('parseReimbursementFromSummeLine', () => {
+  it('parses 3-column Summe line: Total, Werbko, Steuer', () => {
+    const text = 'Summe: 645,60 84,40 13,80'
+    expect(parseReimbursementFromSummeLine(text, text, parseGermanNumber)).toBeCloseTo(547.4, 2)
+  })
+
+  it('parses 2-column Summe line with equal values (all tax-free)', () => {
+    const text = 'Summe: 50,40 50,40'
+    expect(parseReimbursementFromSummeLine(text, text, parseGermanNumber)).toBe(50.4)
+  })
+
+  it('parses 2-column Summe line with different values (Steuer)', () => {
+    const text = 'Summe: 225,60 25,60'
+    expect(parseReimbursementFromSummeLine(text, text, parseGermanNumber)).toBe(200)
+  })
+
+  it('returns null when no Summe line is present', () => {
+    expect(parseReimbursementFromSummeLine('just text', 'just text', parseGermanNumber)).toBeNull()
+  })
+
+  it('returns null for empty text', () => {
+    expect(parseReimbursementFromSummeLine('', '', parseGermanNumber)).toBeNull()
+  })
+})
+
+describe('Real Streckeneinsatzabrechnung 2025 integration (all 12 months)', () => {
+  // Regression suite: uses the actual PDF.js-extracted text from all 12 real
+  // Streckeneinsatzabrechnung2025-XX.pdf files. Verifies BOTH month/year
+  // detection AND tax-free reimbursement amount for every month of the year.
+
+  for (const fixture of REAL_PDF_FIXTURES) {
+    const monthLabel = String(fixture.expected.month).padStart(2, '0')
+
+    describe(`month ${monthLabel}/2025 (${fixture.file})`, () => {
+      it('detects the correct month and year', () => {
+        const result = parseMonthYearFromDocument(fixture.file, fixture.text)
+        expect(result).toEqual({
+          year: fixture.expected.year,
+          month: fixture.expected.month,
+        })
+      })
+
+      it(`extracts ${fixture.expected.taxFree}€ tax-free reimbursement`, () => {
+        const result = parseReimbursementFromSummeLine(
+          fixture.text,
+          fixture.text,
+          parseGermanNumber
+        )
+        expect(result).toBeCloseTo(fixture.expected.taxFree, 2)
+      })
+    })
+  }
 })
