@@ -39,6 +39,71 @@ function isValidMonth(month: number): boolean {
   return month >= 1 && month <= 12;
 }
 
+/**
+ * Strip "Erstellt am DD.MM.YYYY" creation-date stamps from document text.
+ * Handles PDF.js extraction artifacts where "Erstellt" and "am" may be fused
+ * with no space (e.g., "Erstelltam 06.08.2026") or have irregular spacing.
+ */
+function stripErstelltAm(text: string): string {
+  return text.replace(/Erstellt\s*am\s*:?\s*\d{1,2}\.\d{1,2}\.\d{4}/gi, '');
+}
+
+/**
+ * Extract month and year from DD.MM.YYYY date strings in the document text.
+ *
+ * Every Streckeneinsatzabrechnung and Flugstundenübersicht contains multiple
+ * dated rows (expense rows or flight entries) that all belong to the same
+ * month. By collecting all (month, year) tuples and taking the statistical
+ * mode, we get a highly reliable signal that is immune to:
+ *  - "Erstellt am" creation-date stamps (only 1 vote, outvoted by data rows)
+ *  - Cross-month boundary flights (minority, outvoted)
+ *  - Missing or unparseable filenames
+ *
+ * @returns the most common {month, year} pair, or null if no DD.MM.YYYY dates found
+ */
+export function parseMonthYearFromRowDates(
+  fullText: string
+): { year: number; month: number } | null {
+  // Strip Erstellt-am stamps so the creation date doesn't get a vote
+  const cleanedText = stripErstelltAm(fullText);
+
+  const datePattern = /\b(\d{1,2})\.(\d{2})\.(\d{4})\b/g;
+  const counts = new Map<string, { month: number; year: number; count: number }>();
+
+  let match: RegExpExecArray | null;
+  while ((match = datePattern.exec(cleanedText)) !== null) {
+    const day = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const year = parseInt(match[3], 10);
+
+    if (!isValidMonth(month) || !isValidYearRange(year) || day < 1 || day > 31) {
+      continue;
+    }
+
+    const key = `${year}-${month}`;
+    const existing = counts.get(key);
+    if (existing) {
+      existing.count++;
+    } else {
+      counts.set(key, { month, year, count: 1 });
+    }
+  }
+
+  if (counts.size === 0) {
+    return null;
+  }
+
+  // Return the (month, year) pair with the highest vote count
+  let best: { month: number; year: number; count: number } | null = null;
+  for (const entry of counts.values()) {
+    if (!best || entry.count > best.count) {
+      best = entry;
+    }
+  }
+
+  return best ? { year: best.year, month: best.month } : null;
+}
+
 function parseMonthYearFromFilename(fileName: string): { year: number; month: number } | null {
   const yearFirstMatch = fileName.match(/(\d{4})[_-](\d{1,2})/);
   if (yearFirstMatch) {
@@ -76,7 +141,10 @@ function parseMonthYearFromFilename(fileName: string): { year: number; month: nu
  *  3. Other German headers: "Abrechnungsmonat", "für Monat", "Streckeneinsatz-Abrechnung MM/YYYY"
  *  4. "MonthName YYYY" pattern (e.g., "August 2025", "August/2025") — this binds the
  *     month name to a specific year and is highly reliable
- *  5. Last-resort fallback: Month name + first plausible year that is NOT part of an
+ *  5. DD.MM.YYYY row-date mode — collects all full dates in the document and returns
+ *     the most common (month, year) pair. Works for documents with no headers or month
+ *     names but many dated data rows (standard Streckeneinsatzabrechnung layout).
+ *  6. Last-resort fallback: Month name + first plausible year that is NOT part of an
  *     "Erstellt am" creation-date stamp
  */
 export function parseMonthYearFromDocument(
@@ -137,7 +205,17 @@ export function parseMonthYearFromDocument(
     }
   }
 
-  // Strategy 5: Last-resort fallback — month name only, then look for a year that
+  // Strategy 5: DD.MM.YYYY row-date extraction — the most reliable signal for
+  // Streckeneinsatzabrechnung and Flugstundenübersicht documents that contain
+  // many dated rows but no "Monat" header or spelled-out month name. Collects
+  // all dates and takes the mode, which naturally ignores the single Erstellt-am
+  // creation-date stamp.
+  const rowDateResult = parseMonthYearFromRowDates(fullText);
+  if (rowDateResult) {
+    return rowDateResult;
+  }
+
+  // Strategy 6: Last-resort fallback — month name only, then look for a year that
   // is NOT part of the "Erstellt am" creation-date stamp.
   let fallbackMonth: number | null = null;
   const lowerText = fullText.toLowerCase();
@@ -149,11 +227,7 @@ export function parseMonthYearFromDocument(
   }
 
   if (fallbackMonth !== null) {
-    // Strip "Erstellt am DD.MM.YYYY" (and similar date stamps) before year detection
-    // so a document created in 2026 about August 2025 is not misfiled as 08/2026.
-    const textWithoutCreatedDate = fullText
-      .replace(/Erstellt\s+am[:\s]*\d{1,2}\.\d{1,2}\.\d{4}/gi, '')
-      .replace(/erstellt\s+am[:\s]*\d{1,2}\.\d{1,2}\.\d{4}/gi, '');
+    const textWithoutCreatedDate = stripErstelltAm(fullText);
     const yearPattern = /\b(20[2-3]\d)\b/;
     const yearMatch = textWithoutCreatedDate.match(yearPattern);
     if (yearMatch) {
@@ -550,9 +624,15 @@ export async function parseStreckeneinsatzPDF(file: File): Promise<{
   if (parsedDate) {
     year = parsedDate.year;
     month = parsedDate.month;
+  } else {
+    // Defensive fallback: extract from DD.MM.YYYY row dates before using current year
+    const rowDate = parseMonthYearFromRowDates(fullText);
+    if (rowDate) {
+      year = rowDate.year;
+      month = rowDate.month;
+    }
   }
 
-  
   // Extract tax-free reimbursement amount
   // Strategy 1 (primary): Parse individual expense rows for Spesenanspruch and Steuer
   // Strategy 2 (fallback): Parse the Summe line at the bottom of the document

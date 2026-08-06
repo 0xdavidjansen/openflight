@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseMonthYearFromDocument, parseReimbursementFromRows } from './pdfParser'
+import { parseMonthYearFromDocument, parseReimbursementFromRows, parseMonthYearFromRowDates } from './pdfParser'
 
 const parseGermanNumber = (str: string): number => {
   if (!str) return 0
@@ -133,6 +133,58 @@ describe('parseMonthYearFromDocument', () => {
       expect(parseMonthYearFromDocument('unknown.pdf', '')).toBeNull()
     })
   })
+
+  describe('DD.MM.YYYY row-date extraction (strategy 5) — the multi-month regression', () => {
+    // Helper: generate realistic Streckeneinsatzabrechnung text for any month.
+    // Uses numeric dates only — no "Monat" header, no spelled-out month name,
+    // no date in filename. This is the format that previously defaulted to the
+    // current year for all months except those with date-bearing filenames.
+    function makeStreckenText(month: number, year: number): string {
+      const mm = String(month).padStart(2, '0')
+      return [
+        'Streckeneinsatz-Abrechnung',
+        'Datum Ab An Spesenanspruch - Ort Zwölftel stfrei - Ort Steuer Werbko Dopp Storno',
+        `15.${mm}.${year} 07:00 10:35 16,80 FRA 4 MIL16,80 0,00 16,80`,
+        `27.${mm}.${year} 21:50 9,60 TUN 2 TUN`,
+        `28.${mm}.${year} 05:28 24,00 TUN 5 TUN`,
+        '33,60 0,00 33,60',
+        'Summe: 50,40 50,40',
+        'Legende: Dopp = zwei Umläufe an einem Tag stfrei = steuerfrei',
+        'Werbko = Werbungskosten Steuer = zu versteuern',
+      ].join('\n')
+    }
+
+    // Test ALL 12 months to ensure the fix is comprehensive
+    for (let m = 1; m <= 12; m++) {
+      const mm = String(m).padStart(2, '0')
+      it(`correctly identifies ${mm}/2025 for a Streckeneinsatz with generic filename and Erstellt-am 2026 stamp`, () => {
+        const text = makeStreckenText(m, 2025) + '\nErstellt am 06.08.2026'
+        const result = parseMonthYearFromDocument('Streckeneinsatzabrechnung.pdf', text)
+        expect(result).toEqual({ year: 2025, month: m })
+      })
+    }
+
+    it('works for 2026 documents too (not just 2025)', () => {
+      const text = makeStreckenText(3, 2026)
+      expect(parseMonthYearFromDocument('unknown.pdf', text)).toEqual({ year: 2026, month: 3 })
+    })
+
+    it('handles Erstellt-am with no space between Erstellt and am (PDF.js artifact)', () => {
+      const text = makeStreckenText(7, 2025) + '\nErstelltam 06.08.2026'
+      expect(parseMonthYearFromDocument('unknown.pdf', text)).toEqual({ year: 2025, month: 7 })
+    })
+
+    it('outvotes a single Erstellt-am date even when month differs', () => {
+      // 3 expense rows in October 2025, 1 Erstellt-am in November 2026
+      const text = [
+        '15.10.2025 07:00 10:35 16,80 FRA',
+        '20.10.2025 21:50 9,60 TUN',
+        '28.10.2025 05:28 24,00 TUN',
+        'Erstellt am 06.11.2026',
+      ].join('\n')
+      expect(parseMonthYearFromDocument('unknown.pdf', text)).toEqual({ year: 2025, month: 10 })
+    })
+  })
 })
 
 describe('parseReimbursementFromRows', () => {
@@ -220,5 +272,40 @@ describe('parseReimbursementFromRows', () => {
     // Spesenanspruch = 16,80 (from row), Steuer = 0,00 (from row)
     // Summe values (16,80 / 0,00 / 16,80) are excluded
     expect(parseReimbursementFromRows(text, parseGermanNumber)).toBe(16.8)
+  })
+})
+
+describe('parseMonthYearFromRowDates', () => {
+  it('returns the mode of all DD.MM.YYYY dates', () => {
+    const text = '15.08.2025 07:00\n27.08.2025 21:50\n28.08.2025 05:28'
+    expect(parseMonthYearFromRowDates(text)).toEqual({ year: 2025, month: 8 })
+  })
+
+  it('ignores Erstellt-am stamps', () => {
+    const text = '15.03.2025 data\n22.03.2025 data\nErstellt am 06.08.2026'
+    expect(parseMonthYearFromRowDates(text)).toEqual({ year: 2025, month: 3 })
+  })
+
+  it('ignores Erstelltam with no space (PDF.js artifact)', () => {
+    const text = '15.03.2025 data\n22.03.2025 data\nErstelltam06.08.2026'
+    expect(parseMonthYearFromRowDates(text)).toEqual({ year: 2025, month: 3 })
+  })
+
+  it('returns null when no DD.MM.YYYY dates are present', () => {
+    expect(parseMonthYearFromRowDates('just some text without dates')).toBeNull()
+  })
+
+  it('returns null for empty text', () => {
+    expect(parseMonthYearFromRowDates('')).toBeNull()
+  })
+
+  it('handles a single date', () => {
+    expect(parseMonthYearFromRowDates('15.06.2025 some data')).toEqual({ year: 2025, month: 6 })
+  })
+
+  it('handles cross-month boundary flights (majority month wins)', () => {
+    // 2 rows in July, 1 row in August → July wins
+    const text = '30.07.2025 data\n31.07.2025 data\n01.08.2025 data'
+    expect(parseMonthYearFromRowDates(text)).toEqual({ year: 2025, month: 7 })
   })
 })
